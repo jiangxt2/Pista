@@ -1,0 +1,3 @@
+# path-glob<TAB>reason
+pista-catalyst/src/main/resources/com/pista/spark/sql/catalyst/functions/public_suffix_list.dat	Pinned upstream Public Suffix List data; preserve byte-for-byte with its source checksum.
+pista-catalyst/src/test/scala/com/pista/spark/sql/catalyst/functions/catalog/PistaFunctionCatalogSuite.scala	Unicode domain-name contract test requires the original CJK input and punycode expectation.

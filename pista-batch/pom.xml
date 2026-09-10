@@ -1,0 +1,77 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.pista</groupId>
+        <artifactId>pista-parent</artifactId>
+        <version>${revision}</version>
+    </parent>
+
+    <artifactId>pista-batch</artifactId>
+    <packaging>jar</packaging>
+    <name>Pista Batch</name>
+    <description>batch processing module (SparkSQLSubmitter)</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.pista</groupId>
+            <artifactId>pista-test-common</artifactId>
+            <version>${project.version}</version>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Pista SQL -->
+        <dependency>
+            <groupId>com.pista</groupId>
+            <artifactId>pista-sql</artifactId>
+        </dependency>
+
+        <!-- Pista Metrics (SparkSQLSubmitter calls MetricsManager) -->
+        <dependency>
+            <groupId>com.pista</groupId>
+            <artifactId>pista-metrics</artifactId>
+        </dependency>
+
+        <!-- Pista Connector(Doris + ClickHouse,ServiceLoader discovery) -->
+        <dependency>
+            <groupId>com.pista</groupId>
+            <artifactId>pista-connector</artifactId>
+        </dependency>
+
+        <!-- pista-clickhouse-meta -->
+        <dependency>
+            <groupId>com.pista</groupId>
+            <artifactId>pista-clickhouse-meta</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <dependency>
+            <groupId>com.pista</groupId>
+            <artifactId>pista-doris-meta</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- Spark SQL(provided) -->
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-sql_${scala.binary.version}</artifactId>
+        </dependency>
+
+        <!-- Spark Hive (provided scope, SparkSQLSubmitter uses enableHiveSupport) -->
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-hive_${scala.binary.version}</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Iceberg Spark Runtime(test scope,SparkSQLSubmitterIcebergSuite required SparkCatalog) -->
+        <dependency>
+            <groupId>org.apache.iceberg</groupId>
+            <artifactId>iceberg-spark-runtime-3.5_${scala.binary.version}</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+</project>

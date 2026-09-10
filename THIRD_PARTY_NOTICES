@@ -1,0 +1,37 @@
+Pista includes and interoperates with third-party software. Each third-party
+component remains subject to its own license terms.
+
+The Pista assembly preserves dependency-provided license, notice, and
+dependency metadata under META-INF. Release candidates also include CycloneDX
+software bills of materials for the JVM distribution. Those files are the
+authoritative version-specific dependency inventory.
+The JVM SBOM covers components shipped in the Pista assembly. Spark, Hadoop,
+Scala, and their transitive dependencies are provided by the deployment and
+must be inventoried and scanned with that external runtime.
+
+Embedded third-party data
+=========================
+
+Public Suffix List
+------------------
+
+Pista contains a fixed snapshot of the Mozilla Public Suffix List:
+
+  Upstream: https://github.com/publicsuffix/list
+  Source commit: e1b8015c3b2f0f4f8c18659c2480fc1a22c07b20
+  Source path: public_suffix_list.dat
+  License: Mozilla Public License 2.0
+
+The upstream license notice is retained in the data file. Pista's provenance
+record and checksum are documented in:
+
+  pista-catalyst/src/main/resources/com/pista/spark/sql/catalyst/functions/PUBLIC_SUFFIX_LIST.md
+
+Runtime and optional dependencies
+=================================
+
+Pista uses Apache Spark, Scala, ClickHouse JDBC, the Doris Spark connector,
+Apache Iceberg, Lance, FreeMarker, AWS SDK, and
+their transitive dependencies. Dependencies are not relicensed by Pista.
+The source POM files, generated SBOMs, and dependency-provided META-INF notices
+identify the exact versions and terms for a release candidate.

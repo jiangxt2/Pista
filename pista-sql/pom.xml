@@ -1,0 +1,48 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.pista</groupId>
+        <artifactId>pista-parent</artifactId>
+        <version>${revision}</version>
+    </parent>
+
+    <artifactId>pista-sql</artifactId>
+    <packaging>jar</packaging>
+    <name>Pista SQL</name>
+    <description>SQL execution engine layer (SPI + configuration + UDF registration + SparkSession management)</description>
+
+    <dependencies>
+        <!-- Pista Common (includes error codes) -->
+        <dependency>
+            <groupId>com.pista</groupId>
+            <artifactId>pista-common</artifactId>
+        </dependency>
+
+        <!-- Pista Catalyst -->
+        <dependency>
+            <groupId>com.pista</groupId>
+            <artifactId>pista-catalyst</artifactId>
+        </dependency>
+
+        <!-- Spark SQL Core(provided) -->
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-sql_${scala.binary.version}</artifactId>
+        </dependency>
+
+        <!-- Spark Core (provided, for Logging) -->
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-core_${scala.binary.version}</artifactId>
+        </dependency>
+
+        <!-- Spark Hive(providedfor configuration enableHiveSupport) -->
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-hive_${scala.binary.version}</artifactId>
+        </dependency>
+
+    </dependencies>
+</project>

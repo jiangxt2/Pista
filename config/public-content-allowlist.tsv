@@ -1,0 +1,7 @@
+# rule-id<TAB>path-glob<TAB>reason
+non-empty-secret	scripts/check_public_content.py	The scanner contains secret-assignment detection expressions and never stores credential values.
+private-ip	pista-catalyst/src/test/scala/com/pista/spark/sql/catalyst/functions/catalog/PistaFunctionCatalogSuite.scala	Network-function contract tests require RFC1918 values.
+private-ip	pista-sql/src/test/scala/com/pista/spark/sql/functions/PistaFunctionSqlSuite.scala	SQL network-function contract tests require RFC1918 values.
+private-ip	pista-test-common/src/test/scala/com/pista/spark/sql/test/container/IsolatedNetworkFactory.scala	Docker test networks intentionally use RFC1918 ranges.
+private-ip	pista-test-common/src/test/scala/com/pista/spark/sql/test/util/CidrUtils.scala	CIDR allocation utility intentionally models RFC1918 ranges.
+private-ip	pista-test-common/src/test/scala/com/pista/spark/sql/test/util/CidrUtilsSuite.scala	CIDR utility tests intentionally use RFC1918 ranges.

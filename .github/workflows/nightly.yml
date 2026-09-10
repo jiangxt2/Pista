@@ -1,0 +1,60 @@
+name: nightly-full-validation
+
+on:
+  schedule:
+    - cron: "17 18 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-full-validation
+  cancel-in-progress: false
+
+jobs:
+  vulnerability-scan:
+    uses: ./.github/workflows/osv-scan.yml
+    permissions:
+      contents: read
+
+  full-validation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: corretto
+          java-version: "17"
+          cache: maven
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: |
+          python3 -B scripts/check_public_content.py
+          python3 -B scripts/check_language.py
+          python3 -B scripts/check_markdown.py
+          python3 -B scripts/check_public_license.py
+          python3 -B scripts/public_manifest.py --check
+      - run: |
+          python3 -m pip install --disable-pip-version-check --no-input pytest==9.1.1 ruff==0.14.14
+          ruff format --check scripts
+          ruff check scripts
+          python3 -m pytest scripts/tests -q
+      - run: mvn -B test
+      - run: |
+          mvn -B package -DskipTests
+          python3 -B scripts/check_assembly.py
+          scripts/generate_sbom.sh
+      - run: scripts/prepare_hosted_runner.sh
+      - run: scripts/run_domain_it.sh
+      - run: mvn -B -Psubmitter-it test
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: nightly-failure-reports
+          path: |
+            **/target/surefire-reports/**
+            /tmp/pista-*.log
+          if-no-files-found: ignore

@@ -1,0 +1,133 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.pista</groupId>
+        <artifactId>pista-parent</artifactId>
+        <version>${revision}</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>pista-assembly</artifactId>
+    <packaging>jar</packaging>
+    <name>Pista Assembly</name>
+    <description>aggregate complete distribution JARs of all modules JAR</description>
+
+    <properties>
+        <sbt.project.name>assembly</sbt.project.name>
+    </properties>
+
+    <dependencies>
+        <!-- All dependencies of Pista modules -->
+        <dependency>
+            <groupId>com.pista</groupId>
+            <artifactId>pista-common</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.pista</groupId>
+            <artifactId>pista-catalyst</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.pista</groupId>
+            <artifactId>pista-sql</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.pista</groupId>
+            <artifactId>pista-batch</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.pista</groupId>
+            <artifactId>pista-streaming</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.pista</groupId>
+            <artifactId>pista-connector</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.pista</groupId>
+            <artifactId>pista-metrics</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.pista</groupId>
+            <artifactId>pista-clickhouse-meta</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.pista</groupId>
+            <artifactId>pista-doris-meta</artifactId>
+        </dependency>
+
+        <!-- Spark SQL(provided) -->
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-sql_${scala.binary.version}</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>pista-${project.version}</finalName>
+        <plugins>
+            <!-- using configuration shade plugin creation fat JAR -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.5.1</version>
+                <configuration>
+                    <createDependencyReducedPom>false</createDependencyReducedPom>
+                    <filters>
+                        <filter>
+                            <artifact>*:*</artifact>
+                            <excludes>
+                                <!-- exclude signature file to avoid SecurityException -->
+                                <exclude>META-INF/*.SF</exclude>
+                                <exclude>META-INF/*.DSA</exclude>
+                                <exclude>META-INF/*.RSA</exclude>
+                                <exclude>module-info.class</exclude>
+                                <exclude>META-INF/versions/*/module-info.class</exclude>
+                                <exclude>google/protobuf/*.proto</exclude>
+                                <exclude>META-INF/maven/**</exclude>
+                            </excludes>
+                        </filter>
+                    </filters>
+                    <transformers>
+                        <!-- merge ServiceLoader configuration -->
+                        <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                        <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
+                            <resource>META-INF/LICENSE</resource>
+                        </transformer>
+                        <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
+                            <resource>META-INF/LICENSE.txt</resource>
+                        </transformer>
+                        <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
+                            <resource>META-INF/NOTICE</resource>
+                        </transformer>
+                        <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
+                            <resource>META-INF/NOTICE.txt</resource>
+                        </transformer>
+                        <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
+                            <resource>META-INF/DEPENDENCIES</resource>
+                        </transformer>
+                    </transformers>
+                    <artifactSet>
+                        <excludes>
+                            <!-- Exclude Spark and Hadoop (provided)-->
+                            <exclude>org.apache.spark:*</exclude>
+                            <exclude>org.scala-lang:*</exclude>
+                            <exclude>org.apache.hadoop:*</exclude>
+                            <exclude>com.amazonaws:aws-java-sdk-bundle</exclude>
+                            <exclude>org.checkerframework:checker-qual</exclude>
+                        </excludes>
+                    </artifactSet>
+                </configuration>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

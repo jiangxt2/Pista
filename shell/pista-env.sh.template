@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+
+#
+# Pista environment variable template.
+# Copy this file to pista-env.sh and provide deployment-specific values:
+#   cp pista-env.sh.template pista-env.sh
+#
+# Source the generated file from deployment scripts:
+#   source "$(dirname "$0")/../shell/load-pista-env.sh"
+#
+
+# ============================================
+# S3-compatible object storage
+# ============================================
+
+export PISTA_S3A_ENDPOINT="http://<s3-endpoint>:<port>"
+export PISTA_S3A_ACCESS_KEY="<your-access-key>"
+export PISTA_S3A_SECRET_KEY="<your-secret-key>"
+
+# ============================================
+# Iceberg REST Catalog
+# ============================================
+
+export PISTA_ICEBERG_REST_URI="http://<iceberg-rest-host>:<port>/iceberg"
+export PISTA_ICEBERG_WAREHOUSE="s3://<bucket>/iceberg-lakehouse/"
+export PISTA_ICEBERG_IO_IMPL="org.apache.iceberg.aws.s3.S3FileIO"
+
+# ============================================
+# Pista installation directory
+# ============================================
+
+export PISTA_HOME="/opt/pista"
+
+# ============================================
+# Hadoop configuration
+# ============================================
+
+export HADOOP_HOME="/opt/hadoop"
+export HADOOP_CONF_DIR="${HADOOP_HOME}/etc/hadoop"
+export PATH="${HADOOP_HOME}/bin:${PATH}"
+
+# ============================================
+# Spark, Kubernetes, and Pista paths
+# ============================================
+
+export SPARK_HOME="/opt/spark"
+export PISTA_K8S_MASTER="https://<k8s-api-server>:<port>/"
+export PISTA_JAR="${PISTA_HOME}/pista.jar"
+export PISTA_SQL_BASE_DIR="${PISTA_HOME}/sqls"
+export PISTA_HIVE_METASTORE_JARS="/opt/hive/lib/*"
+
+# ============================================
+# Doris cluster configuration
+# ============================================
+
+export PISTA_DORIS_FENODES="<fe-host1>:8030,<fe-host2>:8030,<fe-host3>:8030"
+export PISTA_DORIS_BENODES="<be-host1>:8040,<be-host2>:8040,<be-host3>:8040,..."
+export PISTA_DORIS_USER="<doris-username>"
+export PISTA_DORIS_PASSWORD="<doris-password>"
+export PISTA_DORIS_DATABASE="<doris-database>"
+export PISTA_DORIS_CLUSTER_NAME="<doris-cluster-name>"
+export PISTA_DORIS_QUERY_PORT="9030"
+
+# ============================================
+# ClickHouse cluster configuration
+# ============================================
+
+# Read-only JDBC catalog credentials
+export PISTA_CLICKHOUSE_URL="jdbc:clickhouse://<host>:8123/"
+export PISTA_CLICKHOUSE_USER="<readonly-username>"
+export PISTA_CLICKHOUSE_PASSWORD="<readonly-password>"
+export PISTA_CLICKHOUSE_DRIVER="com.clickhouse.jdbc.ClickHouseDriver"
+
+# Batch-writer credentials
+export PISTA_CLICKHOUSE_WRITER_USER="<writer-username>"
+export PISTA_CLICKHOUSE_WRITER_PASSWORD="<writer-password>"
+
+# Cluster settings
+export PISTA_CLICKHOUSE_CLUSTER="<cluster-name>"
+export PISTA_CLICKHOUSE_PORT="8123"
+export PISTA_CLICKHOUSE_MACHINE_COUNT="<node-count>"
+
+# ============================================
+# PostgreSQL metadata store used by batch writers
+# ============================================
+
+export PISTA_META_HOST="<meta-db-host>"
+export PISTA_META_PORT="<meta-db-port>"
+export PISTA_META_DATABASE="<meta-db-name>"
+export PISTA_META_USER="<meta-db-username>"
+export PISTA_META_PASSWORD="<meta-db-password>"
+
+# ============================================
+# Default Spark resources
+# ============================================
+
+export PISTA_DRIVER_MEMORY="4g"
+export PISTA_EXECUTOR_MEMORY="16g"
+export PISTA_NUM_EXECUTORS="25"
+export PISTA_EXECUTOR_CORES="4"

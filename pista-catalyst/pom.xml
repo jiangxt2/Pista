@@ -1,0 +1,78 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.pista</groupId>
+        <artifactId>pista-parent</artifactId>
+        <version>${revision}</version>
+    </parent>
+
+    <artifactId>pista-catalyst</artifactId>
+    <packaging>jar</packaging>
+    <name>Pista Catalyst</name>
+    <description>Expression Implementation + Function Metadata Declaration (Independent of SparkSession)</description>
+
+    <dependencies>
+        <!-- Pista Common (includes error codes) -->
+        <dependency>
+            <groupId>com.pista</groupId>
+            <artifactId>pista-common</artifactId>
+        </dependency>
+
+        <!-- Spark Catalyst(provided) -->
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-catalyst_${scala.binary.version}</artifactId>
+        </dependency>
+
+        <!-- RoaringBitmap(64-bit portable cohort format) -->
+        <dependency>
+            <groupId>org.roaringbitmap</groupId>
+            <artifactId>RoaringBitmap</artifactId>
+        </dependency>
+
+        <!-- Jackson (explicit declaration to resolve Spark dependency version conflicts) -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-core</artifactId>
+            <version>2.15.2</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>2.15.2</version>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.5.1</version>
+                <executions>
+                    <execution>
+                        <id>generate-function-manifest</id>
+                        <phase>process-classes</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>${java.home}/bin/java</executable>
+                            <classpathScope>compile</classpathScope>
+                            <arguments>
+                                <argument>-classpath</argument>
+                                <classpath/>
+                                <argument>com.pista.spark.sql.catalyst.functions.catalog.FunctionManifestCli</argument>
+                            </arguments>
+                            <outputFile>${project.build.outputDirectory}/META-INF/pista/functions-v1.json</outputFile>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

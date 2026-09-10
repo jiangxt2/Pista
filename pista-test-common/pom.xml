@@ -1,0 +1,142 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.pista</groupId>
+        <artifactId>pista-parent</artifactId>
+        <version>${revision}</version>
+    </parent>
+
+    <artifactId>pista-test-common</artifactId>
+    <packaging>jar</packaging>
+    <name>Pista Test Common</name>
+    <description>IT integration test shared infrastructure (containers, base classes, tools)</description>
+
+    <dependencies>
+        <!-- these dependencies must be kept to ensure they are passed to downstream IT in the form of a test-jar. compile scopefollow downstream IT via the test-jar. test-jar transferred downstream IT. -->
+        <!--
+          MinIO/PostgreSQL intentionally use small project wrappers instead of
+          dedicated Testcontainers modules: the wrappers own run labels,
+          dynamic networks, S3 bucket setup, and the shared cleanup/log path.
+          Keep this choice aligned with the implementation unless the wrappers
+          are migrated as a complete lifecycle change.
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.pista</groupId>
+            <artifactId>pista-sql</artifactId>
+        </dependency>
+
+        <!-- Spark used only for connector level IT on the local SparkSessionparent POM provided provided. -->
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-sql_${scala.binary.version}</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-hive_${scala.binary.version}</artifactId>
+        </dependency>
+
+        <!-- JDBC The JDBC driver is used by the shared test base class. -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.clickhouse</groupId>
+            <artifactId>clickhouse-jdbc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+        </dependency>
+        <!-- S3FileIO with MinIO batch needs to be created AWS SDK v2 the bucket HTTP provider. -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>url-connection-client</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>kms</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>sts</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!--
+              The test JAR is attached during test-compile for downstream IT modules.
+              Compile Scala tests one phase earlier so a cold reactor never attaches
+              an empty test JAR before scala-maven-plugin has produced test classes.
+            -->
+            <plugin>
+                <groupId>net.alchim31.maven</groupId>
+                <artifactId>scala-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>scala-test-compile-first</id>
+                        <phase>process-test-resources</phase>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>${maven-jar-plugin.version}</version>
+                <executions>
+                    <execution>
+                        <id>test-jar</id>
+                        <phase>test-compile</phase>
+                        <goals>
+                            <goal>test-jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-resources-plugin</artifactId>
+                <version>${maven-resources-plugin.version}</version>
+                <executions>
+                    <execution>
+                        <id>copy-postgre-it-ddl</id>
+                        <phase>generate-test-resources</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.testOutputDirectory}/postgre</outputDirectory>
+                            <resources>
+                                <resource>
+                                    <directory>${project.basedir}/../sqls/postgre</directory>
+                                    <includes>
+                                        <include>00_*.sql</include>
+                                        <include>01_*.sql</include>
+                                        <include>02_*.sql</include>
+                                        <include>03_*.sql</include>
+                                        <include>04_*.sql</include>
+                                        <include>06_*.sql</include>
+                                        <include>07_*.sql</include>
+                                        <include>08_*.sql</include>
+                                    </includes>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

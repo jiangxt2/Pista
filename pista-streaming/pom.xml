@@ -1,0 +1,45 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.pista</groupId>
+        <artifactId>pista-parent</artifactId>
+        <version>${revision}</version>
+    </parent>
+
+    <artifactId>pista-streaming</artifactId>
+    <packaging>jar</packaging>
+    <name>Pista Streaming</name>
+    <description>Stream processing module (Kafka native + Structured Streaming)</description>
+
+    <dependencies>
+        <!-- Pista SQL -->
+        <dependency>
+            <groupId>com.pista</groupId>
+            <artifactId>pista-sql</artifactId>
+        </dependency>
+
+        <!-- Spark SQL(provided) -->
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-sql_${scala.binary.version}</artifactId>
+        </dependency>
+
+        <!-- Kafka Connector(provided) -->
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-sql-kafka-0-10_${scala.binary.version}</artifactId>
+        </dependency>
+
+        <!-- Avro support (provided)provided) -->
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-avro_${scala.binary.version}</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>pista-streaming-${project.version}</finalName>
+    </build>
+</project>

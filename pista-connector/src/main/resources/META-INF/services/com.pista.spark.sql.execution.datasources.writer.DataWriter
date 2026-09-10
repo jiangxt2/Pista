@@ -1,0 +1,2 @@
+com.pista.spark.sql.connector.doris.DorisWriter
+com.pista.spark.sql.connector.clickhouse.ClickHouseWriter

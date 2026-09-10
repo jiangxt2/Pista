@@ -1,0 +1,209 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes-and-policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      jvm: ${{ steps.classify.outputs.jvm }}
+      policy: ${{ steps.classify.outputs.policy }}
+      docs: ${{ steps.classify.outputs.docs }}
+      assembly: ${{ steps.classify.outputs.assembly }}
+      clickhouse: ${{ steps.classify.outputs.clickhouse }}
+      doris: ${{ steps.classify.outputs.doris }}
+      iceberg: ${{ steps.classify.outputs.iceberg }}
+      connector_all: ${{ steps.classify.outputs.connector_all }}
+      domain_all: ${{ steps.classify.outputs.domain_all }}
+      domain_it: ${{ steps.classify.outputs.domain_it }}
+      submitter: ${{ steps.classify.outputs.submitter }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: python3 scripts/classify_changes.py --base "$BASE_SHA" --head "$HEAD_SHA"
+
+  content-safety:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: python3 -B scripts/check_public_content.py
+      - run: python3 -B scripts/public_manifest.py --check
+
+  language-and-docs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: python3 -B scripts/check_language.py
+      - run: python3 -B scripts/check_public_content.py
+      - run: python3 -B scripts/check_markdown.py
+
+  license-and-notice:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: python3 -B scripts/check_public_license.py
+
+  policy-tests:
+    needs: changes-and-policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - if: needs.changes-and-policy.outputs.policy == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: needs.changes-and-policy.outputs.policy == 'true'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - if: needs.changes-and-policy.outputs.policy == 'true'
+        run: python -m pip install --disable-pip-version-check --no-input pytest==9.1.1 ruff==0.14.14
+      - if: needs.changes-and-policy.outputs.policy == 'true'
+        run: |
+          ruff format --check scripts
+          ruff check scripts
+          python -m pytest scripts/tests -q
+      - if: needs.changes-and-policy.outputs.policy != 'true'
+        run: echo "Policy validation is not required for this change."
+
+  vulnerability-scan:
+    uses: ./.github/workflows/osv-scan.yml
+    permissions:
+      contents: read
+
+  jvm-quality:
+    needs: changes-and-policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - if: needs.changes-and-policy.outputs.jvm == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: needs.changes-and-policy.outputs.jvm == 'true'
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: corretto
+          java-version: "17"
+          cache: maven
+      - if: needs.changes-and-policy.outputs.jvm == 'true'
+        run: mvn -B test
+      - if: needs.changes-and-policy.outputs.jvm != 'true'
+        run: echo "JVM validation is not required for this change."
+      - if: failure() && needs.changes-and-policy.outputs.jvm == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: jvm-test-reports
+          path: "**/target/surefire-reports/**"
+          if-no-files-found: ignore
+
+  assembly-contract:
+    needs: changes-and-policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - if: needs.changes-and-policy.outputs.assembly == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: needs.changes-and-policy.outputs.assembly == 'true'
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: corretto
+          java-version: "17"
+          cache: maven
+      - if: needs.changes-and-policy.outputs.assembly == 'true'
+        run: |
+          mvn -B package -DskipTests
+          python3 -B scripts/check_assembly.py
+      - if: needs.changes-and-policy.outputs.assembly == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pista-assembly
+          path: pista-assembly/target/pista-*.jar
+          if-no-files-found: error
+      - if: needs.changes-and-policy.outputs.assembly != 'true'
+        run: echo "Assembly validation is not required for this change."
+
+  domain-it:
+    needs: [changes-and-policy, assembly-contract]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - if: needs.changes-and-policy.outputs.domain_it == 'true' || needs.changes-and-policy.outputs.submitter == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: needs.changes-and-policy.outputs.domain_it == 'true' || needs.changes-and-policy.outputs.submitter == 'true'
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: corretto
+          java-version: "17"
+          cache: maven
+      - if: needs.changes-and-policy.outputs.domain_it == 'true' || needs.changes-and-policy.outputs.submitter == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pista-assembly
+          path: pista-assembly/target
+      - if: needs.changes-and-policy.outputs.domain_it == 'true' || needs.changes-and-policy.outputs.submitter == 'true'
+        run: scripts/prepare_hosted_runner.sh
+      - if: needs.changes-and-policy.outputs.domain_all == 'true' || needs.changes-and-policy.outputs.connector_all == 'true' || needs.changes-and-policy.outputs.clickhouse == 'true'
+        run: scripts/run_domain_it.sh clickhouse
+      - if: needs.changes-and-policy.outputs.domain_all == 'true' || needs.changes-and-policy.outputs.connector_all == 'true' || needs.changes-and-policy.outputs.doris == 'true'
+        run: scripts/run_domain_it.sh doris
+      - if: needs.changes-and-policy.outputs.domain_all == 'true' || needs.changes-and-policy.outputs.connector_all == 'true' || needs.changes-and-policy.outputs.iceberg == 'true'
+        run: scripts/run_domain_it.sh iceberg
+      - if: needs.changes-and-policy.outputs.domain_all == 'true'
+        run: scripts/run_domain_it.sh support
+      - if: needs.changes-and-policy.outputs.submitter == 'true'
+        run: mvn -B -Psubmitter-it test
+      - if: needs.changes-and-policy.outputs.domain_it != 'true' && needs.changes-and-policy.outputs.submitter != 'true'
+        run: echo "Domain integration validation is not required for this change."
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: domain-it-reports
+          path: |
+            **/target/surefire-reports/**
+            /tmp/pista-*.log
+          if-no-files-found: ignore
+
+  required-gate:
+    if: always()
+    needs:
+      - changes-and-policy
+      - content-safety
+      - language-and-docs
+      - license-and-notice
+      - policy-tests
+      - vulnerability-scan
+      - jvm-quality
+      - assembly-contract
+      - domain-it
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 -B scripts/check_required_gate.py

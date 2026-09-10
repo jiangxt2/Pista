@@ -1,0 +1,34 @@
+# Local environment configuration
+shell/pista-env.sh
+shell/pista-env.local.sh
+
+# Local test scripts
+shell/test/
+
+# JVM and Spark build/runtime output
+target/
+**/target/
+*.class
+*.log
+.sparkStaging/
+spark-warehouse/
+metastore_db/
+derby.log
+
+# Python environments, caches, and packages
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Editors and operating-system metadata
+.DS_Store
+.idea/
+.vscode/

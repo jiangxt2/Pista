@@ -1,0 +1,42 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.pista</groupId>
+        <artifactId>pista-parent</artifactId>
+        <version>${revision}</version>
+    </parent>
+
+    <artifactId>pista-metrics</artifactId>
+    <packaging>jar</packaging>
+    <name>Pista Metrics</name>
+    <description>Metrics collection and export module (optional, MetricsManager + SparkListener + Extractor/Aggregator)</description>
+
+    <dependencies>
+        <!-- Pista SQL (requires SparkSession, ConfigReader, SubmitterConf) -->
+        <dependency>
+            <groupId>com.pista</groupId>
+            <artifactId>pista-sql</artifactId>
+        </dependency>
+
+        <!-- Spark SQL(provided) -->
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-sql_${scala.binary.version}</artifactId>
+        </dependency>
+
+        <!-- Spark Core (provided, MetricsSparkListener inherits SparkListener) -->
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-core_${scala.binary.version}</artifactId>
+        </dependency>
+
+        <!-- Spark Hive (provided, main code references InsertIntoHiveTable) -->
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-hive_${scala.binary.version}</artifactId>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+</project>
