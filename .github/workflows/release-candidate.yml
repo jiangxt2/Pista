@@ -36,7 +36,6 @@ jobs:
           python3 -B scripts/check_language.py
           python3 -B scripts/check_markdown.py
           python3 -B scripts/check_public_license.py
-          python3 -B scripts/public_manifest.py --check
       - run: |
           python3 -m pip install --disable-pip-version-check --no-input pytest==9.1.1 ruff==0.14.14
           ruff format --check scripts
@@ -53,7 +52,6 @@ jobs:
       - run: |
           mkdir -p target/release
           sha256sum \
-            config/public-snapshot-manifest.tsv \
             pista-assembly/target/pista-*.jar \
             target/sbom/pista-jvm.cdx.json \
             > target/release/SHA256SUMS
@@ -61,7 +59,6 @@ jobs:
         with:
           name: pista-release-candidate-${{ github.sha }}
           path: |
-            config/public-snapshot-manifest.tsv
             pista-assembly/target/pista-*.jar
             target/sbom/pista-jvm.cdx.json
             target/release/SHA256SUMS

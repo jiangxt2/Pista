@@ -36,7 +36,6 @@ jobs:
           python3 -B scripts/check_language.py
           python3 -B scripts/check_markdown.py
           python3 -B scripts/check_public_license.py
-          python3 -B scripts/public_manifest.py --check
       - run: |
           python3 -m pip install --disable-pip-version-check --no-input pytest==9.1.1 ruff==0.14.14
           ruff format --check scripts

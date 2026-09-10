@@ -1,30 +1,28 @@
-# Pista - Claude Code Guide
+# Pista Claude Code Guide
 
-Read `AGENTS.md` before working on this repository. `AGENTS.md` is the canonical source for Pista project facts, architecture, public-snapshot boundaries, testing requirements, and GitHub management rules. This file only provides the Claude Code entry point and must not contradict it.
+Read `AGENTS.md` before working on this repository. `AGENTS.md` is the canonical source for Pista's project facts, architecture, support states, validation requirements, and GitHub workflow. This file is only an entry point and must not contradict it.
 
 ## Working directory
 
-Use a dedicated Pista worktree under `workspace/pista-<branch-name>/`. Keep canonical `master` worktrees for read-only inspection and synchronization. Do not create feature commits directly on `master`.
+Use a dedicated Pista worktree under `workspace/pista-<branch-name>/`. Keep the canonical `master` worktree clean for read-only inspection and synchronization. Do not develop, stage, or commit feature changes directly on `master`.
 
-Pista is the public repository. `Pista-incubator` is a private source/provenance repository; do not copy its history, remotes, tags, reflog, ignored files, or unreviewed content into Pista.
+Before editing files or running project Git operations, verify the repository with `git rev-parse --show-toplevel`. Keep each change within the approved worktree and file scope.
 
 ## Repository management
 
-Pista `master` is protected by the `Protect master` Ruleset. Changes normally arrive through a pull request with one approval, stale-review dismissal, strict `core-gate` and `DCO Check` status checks, and the repository CODEOWNERS review path.
+Pista `master` is protected by repository policy. Changes normally arrive through a pull request and the required CI checks. Use English commit subjects and a valid `Signed-off-by` trailer. Do not add AI co-author trailers unless required by repository policy.
 
-Use English commit subjects and include a Signed-off-by trailer. Do not add AI co-author trailers. Never commit, push, create a pull request, change repository settings, or publish an artifact without explicit user authorization.
+Never commit, push, create a pull request, create an issue, post a comment, change repository settings, or publish an artifact without explicit user authorization. Never use `--no-verify` to bypass checks.
 
-## Current project boundary
+## Project boundary
 
-Pista is a JVM/Spark SQL task-submission and execution-enhancement framework. It owns single-file SQL submission, templates, Catalyst functions, processors, output routing, materialization, metrics, and target-specific integrations.
+Pista is a JVM and Spark SQL runtime for single-file SQL submission, templates, Catalyst functions, Processors, Readers, Writers, output routing, materialization, metrics, and target-specific delivery integrations.
 
-Structured Streaming and target recovery guarantees are Experimental or target-scoped until their required evidence exists. Tributo owns machine-learning training, inference, model lifecycle, and MLflow concerns. Pista has no Python client or PyPI runtime artifact.
+Structured Streaming and target recovery guarantees remain Experimental or target-scoped until their required contract, real-infrastructure, and recovery evidence exists. Pista does not provide a general workflow scheduler, multi-tenant SQL gateway, universal exactly-once delivery, or a Python/PyPI runtime. Machine-learning lifecycle concerns belong to Tributo.
 
-English documentation under `docs/` is canonical. The current public snapshot does not include `examples/` or `docs/zh-CN/`.
+## Local validation
 
-## Local commands
-
-Use JDK 17 and the project Maven/Scala/Spark versions documented in `AGENTS.md`.
+Use JDK 17, Scala 2.12.18, Apache Spark 3.5.8, and the Maven/Scala versions documented in `AGENTS.md`.
 
 ```bash
 mvn -B test
@@ -36,8 +34,10 @@ python3 -B scripts/check_markdown.py
 python3 -B scripts/public_manifest.py --check
 ```
 
-Select real ClickHouse, Doris, Iceberg, object-storage, metadata, or streaming infrastructure tests according to the changed domain. Preserve long-test logs and do not replace missing infrastructure with a false green result.
+Choose focused unit, contract, assembly, or real-infrastructure tests according to the changed domain. Preserve long-test logs and do not report skipped or unavailable required tests as passed.
 
-## Safety
+## Safety and completion
 
-Do not commit credentials, internal endpoints, private topology, business data, or local machine configuration. Do not broaden a change beyond the approved file and behavior scope. When the public snapshot, manifest, provenance, CI policy, or branch protection changes, re-check the full accumulated state before reporting completion.
+Do not commit credentials, private endpoints, business data, local machine configuration, or unintended generated files. Do not weaken failure handling, silently change a target guarantee, or broaden a change beyond its approved scope.
+
+Before reporting completion, confirm the worktree, review the full accumulated diff, verify the relevant tests and public-content checks, record known omissions, and distinguish implementation status from release or remote-merge status.

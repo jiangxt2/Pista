@@ -25,7 +25,6 @@ public_content = importlib.import_module("check_public_content")
 check_language = importlib.import_module("check_language")
 check_markdown = importlib.import_module("check_markdown")
 public_license = importlib.import_module("check_public_license")
-public_manifest = importlib.import_module("public_manifest")
 sbom_check = importlib.import_module("check_sbom")
 RUNTIME_VALIDATION_DOMAINS = tuple(
     domain for domain in classify_changes.DOMAINS if domain != "docs"
@@ -92,7 +91,6 @@ def test_content_metadata_does_not_route_runtime_validation() -> None:
     paths = (
         "config/cjk-allowlist.tsv",
         "config/public-content-allowlist.tsv",
-        "config/public-snapshot-manifest.tsv",
     )
     for path in paths:
         result = classify_changes.classify_paths([path])
@@ -123,7 +121,6 @@ def test_policy_change_routes_only_policy_validation() -> None:
         "scripts/classify_changes.py",
         "scripts/check_public_content.py",
         "scripts/check_public_license.py",
-        "scripts/public_manifest.py",
     )
     for path in paths:
         result = classify_changes.classify_paths([path])
@@ -260,18 +257,6 @@ def test_vulnerability_scan_callers_use_local_workflow() -> None:
         workflow = (WORKFLOW_DIR / name).read_text(encoding="utf-8")
         assert "uses: ./.github/workflows/osv-scan.yml" in workflow
         assert "osv-scanner-reusable.yml@" not in workflow
-
-
-def test_validation_workflows_check_public_manifest() -> None:
-    ci = (WORKFLOW_DIR / "ci.yml").read_text(encoding="utf-8")
-    content_safety = ci.split("  content-safety:", 1)[1].split(
-        "\n  language-and-docs:", 1
-    )[0]
-    assert "python3 -B scripts/public_manifest.py --check" in content_safety
-
-    for name in ("nightly.yml", "release-candidate.yml"):
-        workflow = (WORKFLOW_DIR / name).read_text(encoding="utf-8")
-        assert "python3 -B scripts/public_manifest.py --check" in workflow
 
 
 def test_workflows_pin_current_official_actions() -> None:
@@ -473,26 +458,6 @@ def test_jvm_sbom_rejects_provided_components(tmp_path: Path) -> None:
         finding.startswith("provided-jvm-component:")
         for finding in sbom_check.validate_sbom(sbom)
     )
-
-
-def test_manifest_preserves_existing_source_origins(tmp_path: Path) -> None:
-    manifest = tmp_path / "manifest.tsv"
-    manifest.write_text(
-        public_manifest.HEADER
-        + "\n"
-        + "source-sha\tsource/path\tpublic/path\t100644\t1\t"
-        + ("a" * 64)
-        + "\tpista-public-preparation\tinclude\n",
-        encoding="utf-8",
-    )
-
-    assert public_manifest.load_existing_origins(manifest) == {
-        "public/path": (
-            "source-sha",
-            "source/path",
-            "pista-public-preparation",
-        )
-    }
 
 
 def test_content_rules_detect_constructed_identity_and_business_markers() -> None:
