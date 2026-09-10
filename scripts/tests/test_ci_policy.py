@@ -1,4 +1,4 @@
-"""Fixtures for CI path classification and required-gate behavior."""
+"""Fixtures for CI path classification and required CI gate behavior."""
 
 from __future__ import annotations
 
@@ -144,7 +144,7 @@ def test_policy_output_does_not_route_runtime_validation() -> None:
     assembly = workflow.split("  assembly-contract:", 1)[1].split("\n  domain-it:", 1)[
         0
     ]
-    domain_it = workflow.split("  domain-it:", 1)[1].split("\n  required-gate:", 1)[0]
+    domain_it = workflow.split("  domain-it:", 1)[1].split("\n  core-gate:", 1)[0]
 
     assert "policy: ${{ steps.classify.outputs.policy }}" in changes
     assert "python-quality:" not in workflow
@@ -158,7 +158,7 @@ def test_policy_tests_job_runs_generic_governance_checks() -> None:
     policy = workflow.split("  policy-tests:", 1)[1].split(
         "\n  vulnerability-scan:", 1
     )[0]
-    gate = workflow.split("  required-gate:", 1)[1]
+    gate = workflow.split("  core-gate:", 1)[1]
 
     assert "outputs.policy == 'true'" in policy
     assert "pytest scripts/tests" in policy
@@ -247,7 +247,7 @@ def test_required_gate_checks_out_repository_script() -> None:
     workflow = (SCRIPTS_DIR.parent / ".github/workflows/ci.yml").read_text(
         encoding="utf-8"
     )
-    gate = workflow.split("  required-gate:", 1)[1]
+    gate = workflow.split("  core-gate:", 1)[1]
 
     assert "actions/checkout@" in gate
     assert gate.index("actions/checkout@") < gate.index(
@@ -427,7 +427,7 @@ def test_domain_it_isolated_shards_cover_every_infrastructure_family() -> None:
         assert "run: mvn -B -Pit test" not in workflow
 
     ci = (project_root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    domain_job = ci.split("  domain-it:", 1)[1].split("\n  required-gate:", 1)[0]
+    domain_job = ci.split("  domain-it:", 1)[1].split("\n  core-gate:", 1)[0]
     for shard in ("clickhouse", "doris", "iceberg"):
         assert f"scripts/run_domain_it.sh {shard}" in ci
         shard_condition = domain_job[
