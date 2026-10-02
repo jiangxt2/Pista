@@ -51,7 +51,7 @@ run_requested_shard() {
       ;;
     support)
       run_shard support \
-        "com.pista.spark.sql.test.util,com.pista.spark.sql.batch" 2
+        "com.pista.spark.sql.test.util,com.pista.spark.sql.batch,com.pista.spark.sql.test.container" 4
       ;;
     *)
       echo "Unknown Domain IT shard: $1" >&2
