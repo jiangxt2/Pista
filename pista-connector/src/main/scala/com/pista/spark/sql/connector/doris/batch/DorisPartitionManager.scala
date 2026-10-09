@@ -2,6 +2,7 @@ package com.pista.spark.sql.connector.doris.batch
 
 import com.pista.spark.errors.PistaErrors
 import com.pista.spark.sql.connector.doris.DorisJdbcSupport
+import com.pista.spark.util.LogRedaction
 import org.apache.spark.internal.Logging
 
 /**
@@ -31,8 +32,7 @@ class DorisPartitionManager(config: DorisBatchConfig, jobTimestamp: Long)
    * @throws RuntimeException Partition creation fails, RuntimeException is thrown. The caller should catch this exception and perform cleanup.
    */
   def prepareTempPartitions(): Unit = {
-    logInfo(s"[DorisPartitionManager] Preparing ${tempPartitionNames.size} temp partition(s) " +
-      s"for ${config.database}.${config.table}")
+    logDebug(s"[DorisPartitionManager] stage=prepare partitionCount=${tempPartitionNames.size}")
 
     // clear old temporary partitions from the same batch to avoid conflicts. Range conflict
     tempPartitionNames.values.foreach { temp =>
@@ -48,7 +48,7 @@ class DorisPartitionManager(config: DorisBatchConfig, jobTimestamp: Long)
     tempPartitionNames.foreach { case (formal, temp) =>
       val rangeValues = partitionRanges.getOrElse(formal,
         throw PistaErrors.dorisWriterError(
-          s"[DorisPartitionManager] Formal partition '$formal' not found in ${config.database}.${config.table}"))
+          s"[DorisPartitionManager] Formal partitionRef=${LogRedaction.fingerprint(formal)} not found"))
 
       val sql =
         s"ALTER TABLE `${config.database}`.`${config.table}` " +
@@ -57,10 +57,9 @@ class DorisPartitionManager(config: DorisBatchConfig, jobTimestamp: Long)
       val ok = executeDorisSql(sql, config)
       if (!ok)
         throw PistaErrors.dorisWriterError(
-          s"[DorisPartitionManager] Failed to create temp partition '$temp' " +
-          s"(formal='$formal', range=$rangeValues) for ${config.database}.${config.table}")
+          s"[DorisPartitionManager] Failed to create temporary partitionRef=${LogRedaction.fingerprint(temp)}")
 
-      logInfo(s"[DorisPartitionManager] Created temp partition: $temp (formal=$formal, range=$rangeValues)")
+      logDebug(s"[DorisPartitionManager] stage=prepare partitionRef=${LogRedaction.fingerprint(temp)} outcome=created")
     }
   }
 
@@ -79,15 +78,14 @@ class DorisPartitionManager(config: DorisBatchConfig, jobTimestamp: Long)
       s"REPLACE PARTITION ($formalList) WITH TEMPORARY PARTITION ($tempList) " +
       s"PROPERTIES ('strict_range' = 'false', 'use_temp_partition_name' = 'false')"
 
-    logInfo(s"[DorisPartitionManager] Replacing partitions: $formalList → $tempList")
+    logDebug(s"[DorisPartitionManager] stage=publish partitionCount=${tempPartitionNames.size}")
 
     val ok = executeDorisSql(sql, config)
     if (!ok)
       throw PistaErrors.dorisWriterError(
-        s"[DorisPartitionManager] REPLACE PARTITION failed for ${config.database}.${config.table}. " +
-        s"Formal partitions are intact; temp partitions need manual cleanup: ${tempList}")
+        s"[DorisPartitionManager] REPLACE PARTITION failed; temporary partitionCount=${tempPartitionNames.size}")
 
-    logInfo(s"[DorisPartitionManager] REPLACE PARTITION succeeded for ${config.database}.${config.table}")
+    logDebug("[DorisPartitionManager] stage=publish outcome=completed")
   }
 
   /**
@@ -95,7 +93,7 @@ class DorisPartitionManager(config: DorisBatchConfig, jobTimestamp: Long)
    * DROP TEMPORARY PARTITION IF EXISTS SPARINGLY IDENTITY SAFE.
    */
   def cleanupTempPartitions(): Unit = {
-    logWarning(s"[DorisPartitionManager] Cleaning up ${tempPartitionNames.size} temp partition(s)")
+    logDebug(s"[DorisPartitionManager] stage=cleanup partitionCount=${tempPartitionNames.size}")
 
     tempPartitionNames.values.foreach { temp =>
       val sql =
@@ -104,9 +102,9 @@ class DorisPartitionManager(config: DorisBatchConfig, jobTimestamp: Long)
 
       val ok = executeDorisSql(sql, config)
       if (ok)
-        logInfo(s"[DorisPartitionManager] Dropped temp partition: $temp")
+        logDebug(s"[DorisPartitionManager] stage=cleanup partitionRef=${LogRedaction.fingerprint(temp)} outcome=dropped")
       else
-        logWarning(s"[DorisPartitionManager] Failed to drop temp partition: $temp (may need manual cleanup)")
+        logWarning(s"[DorisPartitionManager] stage=cleanup partitionRef=${LogRedaction.fingerprint(temp)} outcome=failed; manual cleanup may be required")
     }
   }
 
@@ -141,7 +139,7 @@ class DorisPartitionManager(config: DorisBatchConfig, jobTimestamp: Long)
     } catch {
       case e: Exception =>
         throw PistaErrors.dorisWriterError(
-          s"[DorisPartitionManager] Failed to query partitions for ${config.database}.${config.table}: ${e.getMessage}", e)
+          s"[DorisPartitionManager] Failed to query partitions; error=${LogRedaction.exceptionName(e)}", e)
     }
   }
 
@@ -163,10 +161,10 @@ class DorisPartitionManager(config: DorisBatchConfig, jobTimestamp: Long)
     def extractKeys(startIdx: Int): (String, Int) = {
       val keysIdx = rangeStr.indexOf("keys:", startIdx)
       if (keysIdx < 0)
-        throw PistaErrors.dorisWriterError(s"[DorisPartitionManager] Cannot find 'keys:' in: $rangeStr")
+        throw PistaErrors.dorisWriterError("[DorisPartitionManager] Cannot find 'keys:' in partition range")
       val bracketStart = rangeStr.indexOf('[', keysIdx)
       if (bracketStart < 0)
-        throw PistaErrors.dorisWriterError(s"[DorisPartitionManager] Cannot find '[' after 'keys:' in: $rangeStr")
+        throw PistaErrors.dorisWriterError("[DorisPartitionManager] Cannot find '[' after 'keys:' in partition range")
 
       val nextBracket = rangeStr.indexOf('[', bracketStart + 1)
       val searchEnd = if (nextBracket >= 0) nextBracket else rangeStr.length - 1 // Exclude the trailing boundary character
@@ -178,7 +176,7 @@ class DorisPartitionManager(config: DorisBatchConfig, jobTimestamp: Long)
         pos += 1
       }
       if (closeIdx < 0)
-        throw PistaErrors.dorisWriterError(s"[DorisPartitionManager] Cannot find ']' after keys value in: $rangeStr")
+        throw PistaErrors.dorisWriterError("[DorisPartitionManager] Cannot find ']' after keys value in partition range")
 
       val content = rangeStr.substring(bracketStart + 1, closeIdx)
       (content, closeIdx + 1) // Skip "]"
@@ -190,7 +188,7 @@ class DorisPartitionManager(config: DorisBatchConfig, jobTimestamp: Long)
     val boundary = rangeStr.last match {
       case ')' | ']' => rangeStr.last.toString
       case _ =>
-        throw PistaErrors.dorisWriterError(s"[DorisPartitionManager] Unknown boundary in: $rangeStr")
+        throw PistaErrors.dorisWriterError("[DorisPartitionManager] Unknown boundary in partition range")
     }
 
     s"[${formatValue(lower)}, ${formatValue(upper)}$boundary"

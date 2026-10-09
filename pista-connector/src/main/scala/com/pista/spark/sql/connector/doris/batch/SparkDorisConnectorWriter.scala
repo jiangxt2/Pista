@@ -31,7 +31,7 @@ class SparkDorisConnectorWriter(
 
   def write(): BatchWriteResult = {
     val targetTable = buildTargetTable()
-    logInfo(s"[ConnectorWriter] Writing to $targetTable, " +
+    logDebug(s"[ConnectorWriter] Preparing connector options, " +
       s"format=${config.dataFormat}, 2pc=${config.enable2PC}, " +
       s"partitions=${config.outputPartitions}, batchSize=${config.batchSize}")
 

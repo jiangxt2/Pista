@@ -1,9 +1,10 @@
 package com.pista.spark.sql.connector.doris
 
 import com.pista.spark.sql.connector.doris.batch.DorisBatchConfig
+import com.pista.spark.util.LogRedaction
 import org.apache.spark.internal.Logging
 
-import java.sql.{Connection, DriverManager}
+import java.sql.{Connection, DriverManager, SQLException}
 import java.util.Properties
 
 /**
@@ -39,8 +40,8 @@ trait DorisJdbcSupport extends Logging {
       } finally conn.close()
     } catch {
       case e: Exception =>
-        logWarning(
-          s"[DorisJdbcSupport] SQL execution failed with ${e.getClass.getSimpleName}")
+        logWarning(s"[DorisJdbcSupport] stage=ddl ${diagnostics(sql, config, e)}",
+          LogRedaction.sanitizedThrowable(e))
         false
     }
   }
@@ -62,10 +63,19 @@ trait DorisJdbcSupport extends Logging {
       } finally conn.close()
     } catch {
       case e: Exception =>
-        logWarning(
-          s"[DorisJdbcSupport] Row-count query failed with ${e.getClass.getSimpleName}")
+        logWarning(s"[DorisJdbcSupport] stage=verify.row-count ${diagnostics(sql, config, e)}",
+          LogRedaction.sanitizedThrowable(e))
         -1L
     }
+  }
+
+  private def diagnostics(sql: String, config: DorisBatchConfig, error: Throwable): String = {
+    val state = error match {
+      case jdbc: SQLException => Option(jdbc.getSQLState).getOrElse("unknown")
+      case _ => "none"
+    }
+    s"targetRef=${LogRedaction.fingerprint(s"${config.database}.${config.table}")} " +
+      s"sqlRef=${LogRedaction.fingerprint(sql)} sqlState=$state error=${LogRedaction.exceptionName(error)}"
   }
 
   protected def buildDorisJdbcConnection(

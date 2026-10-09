@@ -31,6 +31,14 @@ spark.pista.doris.partition.dateValue=20260407
 
 Expression partitions and shared target scopes require explicit validation; do not generalize a direct date-column example to arbitrary partition expressions.
 
+## Doris metadata and diagnostics
+
+Doris task keys remain bounded to 256 Unicode characters. Existing identities that fit the schema, including legacy filter hashes, keep their representation. Otherwise the writer stores `pista_sha256_` followed by the SHA-256 digest of the complete legacy identity. This covers both whole-table and partition writes while preserving legacy keys and avoiding truncation. Partition dates and predicates are stored completely in `TEXT` columns; see the [configuration and migration instructions](../reference/configuration.md#doris-overwrite-and-metadata).
+
+The connector and atomic-overwrite paths register metadata before temporary-table or temporary-partition preparation. JDBC append does not participate in this metadata flow. Re-registering a task preserves its key and refreshes the selector, predicate, source, and write mode while clearing stale completion state. When metadata is configured on these paths, registration and query failures stop the write, and a success update must affect exactly one registered task. A connector failure cleans up temporary objects and records FAILURE; a secondary metadata failure retains the original connector error. A metadata failure after publication still reports failure: reconcile the target before deciding whether to retry.
+
+INFO logs identify the task and target by stable fingerprints and summarize write mode, metadata availability, partition count, field lengths, and the final outcome. DEBUG logs show preparation, writing, publication, verification, and metadata-stage durations. ERROR logs include the failing stage, exception class, SQLSTATE when available, and actionable schema diagnostics. `taskRef` is the first 12 hexadecimal characters of SHA-256 over the stored task ID; it correlates writer and metadata events. Connection strings, credentials, predicates, partition values, and raw database exception messages are excluded from these diagnostics. Successful low-level metadata operations use DEBUG to avoid repeating the final write summary.
+
 ## Extension rules
 
 - Fail before side effects when configuration or capability requirements are missing.

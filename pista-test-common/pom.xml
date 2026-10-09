@@ -130,6 +130,7 @@
                                         <include>06_*.sql</include>
                                         <include>07_*.sql</include>
                                         <include>08_*.sql</include>
+                                        <include>migrations/*.sql</include>
                                     </includes>
                                 </resource>
                             </resources>

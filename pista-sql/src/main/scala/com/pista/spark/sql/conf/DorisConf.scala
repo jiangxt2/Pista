@@ -115,7 +115,7 @@ private[sql] object DorisConf {
 
   val DORIS_OVERWRITE: ConfigEntryWithDefault[Boolean] =
     PistaConfigBuilder("doris.overwrite")
-      .doc("Whether to overwrite data. A non-empty partitionDate atomically replaces the selected partition " +
+      .doc("Request atomic overwrite; output.mode=overwrite also enables this path. A non-empty partitionDate atomically replaces the selected partition " +
         "through a temporary partition and REPLACE PARTITION; an empty partitionDate replaces the entire table through ALTER TABLE REPLACE.")
       .version("2.5")
       .booleanConf

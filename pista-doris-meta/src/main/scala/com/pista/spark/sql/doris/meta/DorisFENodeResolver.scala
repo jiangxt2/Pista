@@ -1,9 +1,11 @@
 package com.pista.spark.sql.doris.meta
 
 import com.pista.spark.sql.doris.meta.record.DorisFERecord
+import com.pista.spark.errors.PistaErrors
+import com.pista.spark.util.LogRedaction
 import org.apache.spark.internal.Logging
 
-import java.sql.Timestamp
+import java.sql.SQLException
 
 /**
  * Doris FE Node Address Resolver
@@ -38,16 +40,15 @@ class DorisFENodeResolver(connection: Option[DorisMetaConnection]) extends Loggi
   def resolve(paramFenodes: Option[String], clusterName: String): String = {
     paramFenodes.map(_.trim).filter(_.nonEmpty) match {
       case Some(fenodes) =>
-        logInfo(s"[DorisFENodeResolver] Using fenodes from parameter: $fenodes")
+        logDebug(s"[DorisFENodeResolver] source=configuration feCount=${fenodes.split(",").length}")
         fenodes
 
       case None =>
-        logInfo(s"[DorisFENodeResolver] Parameter fenodes empty, " +
-          s"falling back to doris_fe_info table for cluster=$clusterName")
+        logDebug(s"[DorisFENodeResolver] source=metadata clusterRef=${LogRedaction.fingerprint(clusterName)}")
         resolveFromTable(clusterName).getOrElse(
           throw new IllegalStateException(
             s"Cannot resolve Doris FE nodes: parameter not provided and " +
-              s"no records in doris_fe_info for cluster '$clusterName'"))
+              s"no records in doris_fe_info for clusterRef=${LogRedaction.fingerprint(clusterName)}"))
     }
   }
 
@@ -63,12 +64,12 @@ class DorisFENodeResolver(connection: Option[DorisMetaConnection]) extends Loggi
 
     val records = queryFERecords(conn, clusterName)
     if (records.isEmpty) {
-      logWarning(s"[DorisFENodeResolver] No FE records found for cluster $clusterName")
+      logWarning(s"[DorisFENodeResolver] No FE records found for clusterRef=${LogRedaction.fingerprint(clusterName)}")
       None
     } else {
       val sorted = records.sortBy(r => (!r.isLeader, r.feHost))
       val fenodes = sorted.map(r => s"${r.feHost}:${r.feHttpPort}").mkString(",")
-      logInfo(s"[DorisFENodeResolver] Resolved ${records.size} FE node(s) from table: $fenodes")
+      logDebug(s"[DorisFENodeResolver] source=metadata feCount=${records.size}")
       Some(fenodes)
     }
   }
@@ -110,8 +111,14 @@ class DorisFENodeResolver(connection: Option[DorisMetaConnection]) extends Loggi
       } finally c.close()
     } catch {
       case e: Exception =>
-        logError(s"[DorisFENodeResolver] FE lookup failed with ${e.getClass.getSimpleName}")
-        Seq.empty
+        val state = e match {
+          case sql: SQLException => Option(sql.getSQLState).getOrElse("unknown")
+          case _ => "none"
+        }
+        val reason = s"Metadata FE lookup failed; clusterRef=${LogRedaction.fingerprint(clusterName)} " +
+          s"sqlState=$state error=${LogRedaction.exceptionName(e)}"
+        logError(s"[DorisFENodeResolver] stage=metadata.resolve-fe $reason", LogRedaction.sanitizedThrowable(e))
+        throw PistaErrors.dorisWriterError(reason, e)
     }
   }
 }
