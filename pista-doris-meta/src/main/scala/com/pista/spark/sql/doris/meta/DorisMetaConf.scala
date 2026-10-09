@@ -1,6 +1,6 @@
 package com.pista.spark.sql.doris.meta
 
-import com.pista.spark.sql.conf.SubmitterConf
+import com.pista.spark.sql.conf.{ConfigReader, SubmitterConf}
 import org.apache.spark.SparkConf
 
 /**
@@ -24,16 +24,40 @@ case class DorisMetaConf(
 )
 
 object DorisMetaConf {
+  private val requiredKeys = Seq(
+    SubmitterConf.META_HOST.key,
+    SubmitterConf.META_DATABASE.key,
+    SubmitterConf.META_USERNAME.key,
+    SubmitterConf.META_PASSWORD.key,
+    SubmitterConf.DORIS_CLUSTER_NAME.key)
+
+  /** Cluster identity alone does not request a PostgreSQL metadata store. */
+  def isConfigured(conf: ConfigReader): Boolean =
+    conf.getAllWithPrefix("spark.pista.meta.").nonEmpty
+
+  def missingKeys(conf: ConfigReader): Seq[String] =
+    requiredKeys.filter { key =>
+      conf.getOption(key).forall(value =>
+        key != SubmitterConf.META_PASSWORD.key && value.trim.isEmpty)
+    }
+
+  def fromConfigReader(conf: ConfigReader): DorisMetaConf = {
+    val missing = missingKeys(conf)
+    if (missing.nonEmpty)
+      throw new NoSuchElementException(s"Missing Doris metadata configuration keys: ${missing.mkString(", ")}")
+
+    DorisMetaConf(
+      pgHost = conf.get(SubmitterConf.META_HOST).get,
+      pgPort = conf.get(SubmitterConf.META_PORT),
+      pgDatabase = conf.get(SubmitterConf.META_DATABASE).get,
+      pgUsername = conf.get(SubmitterConf.META_USERNAME).get,
+      pgPassword = conf.get(SubmitterConf.META_PASSWORD).get,
+      clusterName = conf.get(SubmitterConf.DORIS_CLUSTER_NAME).get)
+  }
+
   /**
    * Create metadata configuration from SparkConf
    */
   def fromSparkConf(conf: SparkConf): DorisMetaConf =
-    DorisMetaConf(
-      pgHost      = conf.get(SubmitterConf.META_HOST.key),
-      pgPort      = conf.getInt(SubmitterConf.META_PORT.key, SubmitterConf.META_PORT.defaultValue.get),
-      pgDatabase  = conf.get(SubmitterConf.META_DATABASE.key),
-      pgUsername  = conf.get(SubmitterConf.META_USERNAME.key),
-      pgPassword  = conf.get(SubmitterConf.META_PASSWORD.key),
-      clusterName = conf.get(SubmitterConf.DORIS_CLUSTER_NAME.key)
-    )
+    fromConfigReader(ConfigReader(conf.getAll.toMap))
 }

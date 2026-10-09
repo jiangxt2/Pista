@@ -2,6 +2,7 @@ package com.pista.spark.sql.connector.doris.batch
 
 import com.pista.spark.sql.connector.BatchWriteResult
 import com.pista.spark.sql.doris.meta.DorisMetaManager
+import com.pista.spark.sql.connector.doris.DorisLogCapture
 import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.funsuite.AnyFunSuite
@@ -103,6 +104,112 @@ class DorisConcurrentWriterSuite extends AnyFunSuite with BeforeAndAfterAll {
     assert(!taskId.contains(longDate))
     val suffix = taskId.stripPrefix("test_cluster_pista_mydb_mytable_")
     assert(suffix.length == 64)
+  }
+
+  test("task ID boundary preserves 256 characters and bounds longer whole-table identities") {
+    val writer = new TestableDorisConcurrentWriter(minimalConfig(), noMetaContext, spark)
+    val short = minimalConfig().copy(labelPrefix = "")
+    val overhead = writer.exposedBuildTaskId(short, Some("test_cluster")).length
+    val exact = short.copy(labelPrefix = "l" * (256 - overhead))
+    val exactId = writer.exposedBuildTaskId(exact, Some("test_cluster"))
+    assert(exactId.length == 256)
+    assert(exactId.endsWith("_all"))
+    val longer = exact.copy(labelPrefix = exact.labelPrefix + "l")
+    val compact = writer.exposedBuildTaskId(longer, Some("test_cluster"))
+    assert(compact.matches("pista_sha256_[0-9a-f]{64}"))
+    assert(compact == writer.exposedBuildTaskId(longer, Some("test_cluster")))
+    assert(compact != writer.exposedBuildTaskId(longer.copy(table = "other"), Some("test_cluster")))
+  }
+
+  test("Unicode IDs use PostgreSQL character limits and long partition bases are bounded") {
+    val writer = new TestableDorisConcurrentWriter(minimalConfig(), noMetaContext, spark)
+    val character = new String(Character.toChars(0x1f680))
+    val unicode = minimalConfig().copy(labelPrefix = character * 100)
+    val id = writer.exposedBuildTaskId(unicode, Some("test_cluster"))
+    assert(id.endsWith("_all"))
+    assert(DorisMetaManager.characterCount(id) < 256)
+    val longBase = minimalConfig().copy(labelPrefix = "l" * 250,
+      partitionColumn = "biz_date", partitionDate = "20261001")
+    assert(writer.exposedBuildTaskId(longBase, Some("test_cluster")).length <= 256)
+    val mediumFilter = minimalConfig().copy(partitionColumn = "biz_date",
+      partitionDate = (1 to 28).map(day => f"202610$day%02d").mkString(","))
+    assert(writer.exposedBuildTaskId(mediumFilter, Some("test_cluster")).matches("pista_sha256_[0-9a-f]{64}"))
+  }
+
+  test("failed metadata registration blocks preparation and preserves the original error") {
+    val failure = new IllegalStateException("metadata unavailable")
+    val meta = new RecordingMetaManager {
+      override def upsertRunning(taskId: String, database: String, table: String,
+        partitionDate: String, writeMode: String, sourceTable: Option[String],
+        partitionFilter: Option[String]): Unit = throw failure
+    }
+    val writer = new TestableDorisConcurrentWriter(minimalConfig().copy(overwrite = true),
+      DorisConcurrentContext(Some("test_cluster"), Some(meta)), spark)
+    assert(intercept[IllegalStateException](writer.write()) eq failure)
+    assert(!writer.tablePrepared)
+    assert(!writer.connectorCalled)
+    assert(meta.successRowCount.isEmpty)
+  }
+
+  test("metadata cleanup failure cannot replace the connector error") {
+    val original = new IllegalStateException("connector error")
+    val secondary = new IllegalStateException("metadata unavailable")
+    val meta = new RecordingMetaManager {
+      override def markFailure(taskId: String, errorMessage: String): Unit = throw secondary
+    }
+    val writer = new TestableDorisConcurrentWriter(minimalConfig().copy(overwrite = true),
+      DorisConcurrentContext(Some("test_cluster"), Some(meta)), spark)
+    writer.connectorWriteException = Some(original)
+    val result = intercept[IllegalStateException](writer.write())
+    assert(result eq original)
+    assert(result.getSuppressed.toSeq.contains(secondary))
+    assert(writer.cleanupTempTableCalled)
+  }
+
+  test("partition preparation failure cleans temporary partitions and retains the original error") {
+    val original = new IllegalStateException("preparation failed")
+    val secondary = new IllegalStateException("cleanup failed")
+    val meta = new RecordingMetaManager
+    val config = minimalConfig().copy(overwrite = true,
+      partitionDate = "20261001", partitionColumn = "biz_date")
+    val writer = new TestableDorisConcurrentWriter(config,
+      DorisConcurrentContext(Some("test_cluster"), Some(meta)), spark)
+    writer.preparePartitionsException = Some(original)
+    writer.cleanupPartitionsException = Some(secondary)
+    val result = intercept[IllegalStateException](writer.write())
+    assert(result eq original)
+    assert(result.getSuppressed.toSeq.contains(secondary))
+    assert(writer.cleanupTempPartitionsCalled)
+    assert(!writer.connectorCalled)
+    assert(meta.failureMessage.isDefined)
+  }
+
+  test("success metadata failure cannot produce a successful write outcome") {
+    val failure = new IllegalStateException("success update missing")
+    val meta = new RecordingMetaManager {
+      override def markSuccess(taskId: String, rowCount: Long): Unit = throw failure
+    }
+    val writer = new TestableDorisConcurrentWriter(minimalConfig().copy(overwrite = true),
+      DorisConcurrentContext(Some("test_cluster"), Some(meta)), spark)
+    assert(intercept[IllegalStateException](writer.write()) eq failure)
+    assert(writer.connectorCalled)
+  }
+
+  test("stage logs expose failure location and redact task predicates and exception messages") {
+    val config = minimalConfig().copy(overwrite = true,
+      partitionColumn = "biz_date", partitionDate = "20261001")
+    val (_, messages) = DorisLogCapture { sink =>
+      val writer = new TestableDorisConcurrentWriter(config, noMetaContext, spark) {
+        override protected def log: org.slf4j.Logger = sink
+      }
+      writer.connectorWriteException = Some(new IllegalStateException("private-value"))
+      intercept[IllegalStateException](writer.write())
+    }
+    assert(messages.exists(_.contains("stage=write outcome=failed")))
+    assert(messages.exists(_.contains("taskRef=")))
+    assert(!messages.mkString.contains("private-value"))
+    assert(!messages.mkString.contains("20261001"))
+    assert(!messages.mkString.contains("biz_date ="))
   }
 
   // ==================== Idempotent Skip ====================
@@ -311,6 +418,8 @@ class TestableDorisConcurrentWriter(
   var abortByLabelCallCount: Int = 0
   var cleanupTempTableCalled: Boolean = false
   var cleanupTempPartitionsCalled: Boolean = false
+  var tablePrepared: Boolean = false
+  var connectorCalled: Boolean = false
 
   var connectorWriteResult: BatchWriteResult = BatchWriteResult(0, 0L, success = true)
   var connectorWriteException: Option[Exception] = None
@@ -321,13 +430,18 @@ class TestableDorisConcurrentWriter(
 
   var replaceTableException: Option[Exception] = None
   var replacePartitionsException: Option[Exception] = None
+  var preparePartitionsException: Option[Exception] = None
+  var cleanupPartitionsException: Option[Exception] = None
 
   override protected def createConnectorWriter(
     config: DorisBatchConfig, df: DataFrame, ts: Long
   ): SparkDorisConnectorWriter = new SparkDorisConnectorWriter(config, df, ts) {
-    override def write(): BatchWriteResult = connectorWriteException match {
-      case Some(ex) => throw ex
-      case None     => connectorWriteResult
+    override def write(): BatchWriteResult = {
+      connectorCalled = true
+      connectorWriteException match {
+        case Some(ex) => throw ex
+        case None     => connectorWriteResult
+      }
     }
   }
 
@@ -343,7 +457,7 @@ class TestableDorisConcurrentWriter(
   override protected def createTableSwapManager(
     config: DorisBatchConfig, ts: Long
   ): DorisTableSwapManager = new DorisTableSwapManager(config, ts) {
-    override def createTempTable(): Unit = ()
+    override def createTempTable(): Unit = tablePrepared = true
     override def replaceTable(): Unit = replaceTableException.foreach(throw _)
     override def cleanupTempTable(): Unit = cleanupTempTableCalled = true
   }
@@ -351,9 +465,12 @@ class TestableDorisConcurrentWriter(
   override protected def createPartitionManager(
     config: DorisBatchConfig, ts: Long
   ): DorisPartitionManager = new DorisPartitionManager(config, ts) {
-    override def prepareTempPartitions(): Unit = ()
+    override def prepareTempPartitions(): Unit = preparePartitionsException.foreach(throw _)
     override def replacePartitions(): Unit = replacePartitionsException.foreach(throw _)
-    override def cleanupTempPartitions(): Unit = cleanupTempPartitionsCalled = true
+    override def cleanupTempPartitions(): Unit = {
+      cleanupTempPartitionsCalled = true
+      cleanupPartitionsException.foreach(throw _)
+    }
   }
 
   def exposedBuildTaskId(config: DorisBatchConfig, clusterName: Option[String]): String =

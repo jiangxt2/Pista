@@ -34,13 +34,12 @@ class DorisWriter
     stats: DataStats,
     config: OutputConfig
   ): Unit = {
-    val sparkConf = df.sparkSession.sparkContext.getConf
-    val overwrite = sparkConf.getOption(SubmitterConf.DORIS_OVERWRITE.key)
-      .exists(_.toLowerCase == "true")
+    val conf = ConfigReader(df.sparkSession)
+    val overwrite = overwriteRequested(conf, config)
 
     if (overwrite) {
-      logInfo(s"[$engineName] overwrite=true, forcing Connector mode")
-      val transformedDf = transformPartitionColumnIfNeeded(df, sparkConf)
+      logDebug(s"[$engineName] Atomic overwrite requested, selecting Connector mode")
+      val transformedDf = transformPartitionColumnIfNeeded(df, conf)
       writeViaConnector(transformedDf, config)
     } else {
       writeInternalTemplate(df, stats, config)
@@ -54,14 +53,13 @@ class DorisWriter
     config: OutputConfig
   ): Unit = {
     val spark = df.sparkSession
-    val sparkConf = spark.sparkContext.getConf
     val conf = ConfigReader(spark)
 
-    val metaCtxOpt = tryInitMetaContext(sparkConf)
-    logInfo(s"[$engineName] Meta tracking ${if (metaCtxOpt.isDefined) "enabled" else "disabled"}")
+    val metaCtxOpt = tryInitMetaContext(conf)
 
     try {
-      val batchConfig = buildBatchConfig(conf, metaCtxOpt)
+      val batchConfig = buildBatchConfig(conf, metaCtxOpt, overwriteRequested(conf, config))
+      if (batchConfig.overwrite) validateOverwriteTarget(config, batchConfig)
       val context = DorisConcurrentContext(
         clusterName = conf.getOption(SubmitterConf.DORIS_CLUSTER_NAME.key),
         metaManager = metaCtxOpt.map(_.manager)
@@ -72,7 +70,6 @@ class DorisWriter
       if (!result.success)
         throw PistaErrors.dorisWriterError(result.errorMessage)
 
-      logInfo(s"[$engineName] Write completed: ${result.rowCount} rows")
     } finally {
       metaCtxOpt.foreach(ctx => Try(ctx.close()))
     }
@@ -113,34 +110,54 @@ class DorisWriter
 
   // ========== Internal Support ==========
 
-  /**
-   * Initialize Meta context (degraded optional).
-   *
-   * Reference ClickHouseWriter.tryInitMetaManager:
-   * - classpath missing → degradation (None)None)
-   * - Configuration missing → Degradation (None)
-   * - Connection failed → Throw exception (write interrupted)
-   */
-  private def tryInitMetaContext(sparkConf: org.apache.spark.SparkConf): Option[MetaContext] =
+  private def overwriteRequested(conf: ConfigReader, config: OutputConfig): Boolean = {
+    val dorisOverwrite = conf.get(SubmitterConf.DORIS_OVERWRITE)
+    config.mode.equalsIgnoreCase("overwrite") || dorisOverwrite
+  }
+
+  private def validateOverwriteTarget(config: OutputConfig, batchConfig: DorisBatchConfig): Unit = {
+    val requested = normalizeTableIdentifier(config.path.getOrElse("").trim, batchConfig.database)
+    val configured = s"${batchConfig.database}.${batchConfig.table}"
+    if (requested != configured) {
+      val reason = "Conflicting Doris overwrite target: spark.pista.output.path must match " +
+        "spark.pista.doris.database and spark.pista.doris.table"
+      logError(s"[DorisWriter] stage=configuration.target outcome=failed reason=$reason")
+      throw PistaErrors.dorisWriterError(reason)
+    }
+  }
+
+  /** Only a completely unconfigured PostgreSQL store may disable metadata. */
+  private def tryInitMetaContext(conf: ConfigReader): Option[MetaContext] = {
+    if (conf.getAllWithPrefix("spark.pista.meta.").isEmpty) {
+      logInfo("[DorisWriter] Metadata disabled: PostgreSQL metadata is not configured")
+      return None
+    }
+
     try {
-      val metaConf = DorisMetaConf.fromSparkConf(sparkConf)
+      val missing = DorisMetaConf.missingKeys(conf)
+      if (missing.nonEmpty) {
+        val reason = s"Incomplete Doris metadata configuration; missing keys: ${missing.mkString(", ")}"
+        logError(s"[DorisWriter] stage=metadata.configure outcome=failed reason=$reason")
+        throw PistaErrors.dorisWriterError(reason)
+      }
+      val metaConf = DorisMetaConf.fromConfigReader(conf)
       val conn = new DorisMetaConnection(metaConf)
       Some(MetaContext(conn, new DorisMetaManager(conn, metaConf)))
     } catch {
-      case _: NoClassDefFoundError | _: ExceptionInInitializerError =>
-        logWarning("[DorisWriter] pista-doris-meta not in classpath, Meta tracking disabled")
-        None
-      case _: NoSuchElementException =>
-        logWarning("[DorisWriter] Meta not configured, Meta tracking disabled")
-        None
+      case error @ (_: NoClassDefFoundError | _: ExceptionInInitializerError) =>
+        val reason = "Doris metadata was requested but pista-doris-meta could not be loaded; check the runtime assembly"
+        logError(s"[DorisWriter] stage=metadata.configure outcome=failed reason=$reason")
+        throw PistaErrors.dorisWriterError(reason, error)
     }
+  }
 
   /**
    * Build DorisBatchConfig from spark.pista.doris.* settings.
    */
   private def buildBatchConfig(
     conf: ConfigReader,
-    metaCtxOpt: Option[MetaContext]
+    metaCtxOpt: Option[MetaContext],
+    overwrite: Boolean
   ): DorisBatchConfig = {
     val clusterName = conf.getOption(SubmitterConf.DORIS_CLUSTER_NAME.key)
       .getOrElse("default_cluster")
@@ -165,7 +182,7 @@ class DorisWriter
       benodes           = conf.get(SubmitterConf.DORIS_BENODES),
       sourceTable       = None,
       feQueryPort       = conf.get(SubmitterConf.DORIS_FE_QUERY_PORT),
-      overwrite          = conf.get(SubmitterConf.DORIS_OVERWRITE),
+      overwrite         = overwrite,
       partitionDate     = conf.get(SubmitterConf.DORIS_PARTITION_DATE),
       partitionColumn   = conf.get(SubmitterConf.DORIS_PARTITION_COLUMN)
     )
@@ -177,13 +194,10 @@ class DorisWriter
    */
   private def transformPartitionColumnIfNeeded(
     df: DataFrame,
-    sparkConf: org.apache.spark.SparkConf
+    conf: ConfigReader
   ): DataFrame = {
-    val partitionColumn = sparkConf.getOption(SubmitterConf.DORIS_PARTITION_COLUMN.key)
-    val dateFormat = sparkConf.get(
-      SubmitterConf.DORIS_PARTITION_DATE_FORMAT.key,
-      SubmitterConf.DORIS_PARTITION_DATE_FORMAT.defaultValue.getOrElse("yyyyMMdd")
-    )
+    val partitionColumn = conf.getOption(SubmitterConf.DORIS_PARTITION_COLUMN.key)
+    val dateFormat = conf.get(SubmitterConf.DORIS_PARTITION_DATE_FORMAT)
 
     partitionColumn match {
       case Some(colName) if df.schema.fields.exists(f => f.name == colName && f.dataType == org.apache.spark.sql.types.StringType) =>
@@ -194,6 +208,6 @@ class DorisWriter
   }
 
   private case class MetaContext(connection: DorisMetaConnection, manager: DorisMetaManager) {
-    def close(): Unit = { manager.close(); connection.close() }
+    def close(): Unit = manager.close()
   }
 }
