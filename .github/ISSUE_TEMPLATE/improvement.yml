@@ -1,0 +1,40 @@
+name: Improvement
+description: Suggest an improvement to existing Pista behavior.
+title: "[Improvement] "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: Use this form for improvements to existing performance, usability, or maintainability. Use Bug Report for incorrect behavior and Feature Request for a new capability. Remove credentials, private endpoints, and business data from examples.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What would you like to be improved?
+      description: Describe the current limitation and affected component. For performance issues, include the versions, workload, and measurements when available.
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Expected improvement
+      description: Describe the desired outcome and how it would help your use case.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: How should we improve?
+      description: Provide a possible approach or workaround if you have one.
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add related issues, references, or supporting evidence.
+    validations:
+      required: false

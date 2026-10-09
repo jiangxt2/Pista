@@ -1,0 +1,48 @@
+name: Feature Request
+description: Suggest a new capability for Pista.
+title: "[FEATURE] "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: Please search existing issues before proposing a feature. Describe the need and intended behavior without treating a proposal as an already supported capability. Remove credentials, private endpoints, and business data from examples.
+
+  - type: textarea
+    id: feature
+    attributes:
+      label: Describe the feature
+      description: Explain the capability you would like Pista to provide.
+    validations:
+      required: true
+
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation and use case
+      description: Describe what you are trying to achieve and why the existing behavior does not meet your needs. Include the affected component or target engine when relevant.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Describe the proposed solution
+      description: If you have a suggestion, describe the desired behavior and its scope. An implementation plan is not required.
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Describe existing workarounds or other ways to meet the need.
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add related issues, references, or examples.
+    validations:
+      required: false

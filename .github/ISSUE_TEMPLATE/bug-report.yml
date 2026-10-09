@@ -1,0 +1,54 @@
+name: Bug Report
+description: Report a reproducible problem with Pista.
+title: "[Bug report] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Please search existing issues before reporting a bug. Remove credentials, private endpoints, and business data from all examples and logs. For suspected vulnerabilities, follow the [security policy](https://github.com/jiangxt2/Pista/blob/master/SECURITY.md).
+
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened and what did you expect?
+      description: Describe the problem, the expected behavior, and the affected Pista component or integration.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Versions and environment
+      description: Include the Pista version or commit, Spark, Scala, JDK, operating system, and deployment mode. For integration issues, include connector and target engine versions.
+      placeholder: |
+        Pista version or commit:
+        Spark / Scala / JDK:
+        Operating system and deployment mode:
+        Connector and target engine versions (if applicable):
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: How to reproduce
+      description: Provide minimal SQL or code, synthetic data, relevant configuration, and the submission command. If an external service is needed, include its version and the setup steps or table DDL.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error message or logs
+      description: Paste relevant error messages or stack traces as text. Redact sensitive values; code fences are added automatically.
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Include the impact, any workaround, or related issues.
+    validations:
+      required: false
