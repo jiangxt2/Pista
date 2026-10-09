@@ -1,0 +1,32 @@
+name: Documentation
+description: Report a problem or missing information in the Pista documentation.
+title: "[Docs] "
+labels: [documentation]
+body:
+  - type: markdown
+    attributes:
+      value: Please search existing issues before reporting a documentation problem. Remove credentials, private endpoints, and business data from examples.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Describe the incorrect, unclear, or missing information and what you would like to see instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: location
+    attributes:
+      label: Documentation link or path
+      description: For existing content, provide the page URL or repository path and section. Include the Pista version and documentation language if relevant.
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add examples, related issues, or references that clarify the expected documentation.
+    validations:
+      required: false
