@@ -10,6 +10,9 @@ Pista is a Spark SQL task-submission and execution-enhancement framework. Spark 
 - [Kyuubi batch submission (experimental)](kyuubi-submission.md)
 - [Configuration](reference/configuration.md)
 - [Errors](reference/error-codes.md)
+- [Release process](releases.md)
+- [Support matrix](SUPPORT_MATRIX.md)
+- [Stability policy](STABILITY.md)
 
 ## Modules
 

@@ -2,6 +2,15 @@ name: release-candidate
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: Approved stable major.minor.patch version
+        required: true
+        type: string
+      expected_commit:
+        description: Approved full source commit SHA
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -11,18 +20,19 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  vulnerability-scan:
-    uses: ./.github/workflows/osv-scan.yml
-    permissions:
-      contents: read
-
   build-candidate:
-    needs: vulnerability-scan
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     environment: release-candidate
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      SOURCE_COMMIT: ${{ inputs.expected_commit }}
+    outputs:
+      artifact_name: pista-release-candidate-${{ github.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Validate approved source and version
+        run: python3 -B scripts/prepare_release.py check --version "$RELEASE_VERSION" --commit "$SOURCE_COMMIT"
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: corretto
@@ -43,23 +53,35 @@ jobs:
           python3 -m pytest scripts/tests -q
       - run: mvn -B test
       - run: |
-          mvn -B package -DskipTests
+          mvn -B package -DskipTests -Dpista.source.revision="$SOURCE_COMMIT"
           python3 -B scripts/check_assembly.py
           scripts/generate_sbom.sh
       - run: scripts/prepare_hosted_runner.sh
       - run: scripts/run_domain_it.sh
       - run: mvn -B -Psubmitter-it test
-      - run: |
-          mkdir -p target/release
-          sha256sum \
-            pista-assembly/target/pista-*.jar \
-            target/sbom/pista-jvm.cdx.json \
-            > target/release/SHA256SUMS
+      - name: Package the validated candidate
+        run: python3 -B scripts/prepare_release.py package --version "$RELEASE_VERSION" --commit "$SOURCE_COMMIT"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pista-release-candidate-${{ github.sha }}
-          path: |
-            pista-assembly/target/pista-*.jar
-            target/sbom/pista-jvm.cdx.json
-            target/release/SHA256SUMS
+          path: target/release/*
           if-no-files-found: error
+      - name: Preserve validation reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pista-candidate-validation-${{ github.sha }}
+          path: |
+            **/target/surefire-reports/**
+            /tmp/pista-*.log
+          if-no-files-found: ignore
+
+  vulnerability-scan:
+    needs: build-candidate
+    uses: ./.github/workflows/osv-scan.yml
+    with:
+      candidate_artifact: ${{ needs.build-candidate.outputs.artifact_name }}
+      release_version: ${{ inputs.version }}
+      source_commit: ${{ inputs.expected_commit }}
+    permissions:
+      contents: read

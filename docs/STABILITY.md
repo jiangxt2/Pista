@@ -1,6 +1,9 @@
 # Stability Policy
 
-Pista has not published a stable release. Unless a document explicitly says otherwise, current APIs and configuration are pre-release and may change with release notes and migration guidance.
+Published stable [GitHub Releases](https://github.com/jiangxt2/Pista/releases) define
+the versions covered by this policy. A source revision or candidate build is not
+itself a published release. The first release targets version 2.5.0; master moves
+to 2.6.0-SNAPSHOT after publication is verified.
 
 ## Stability levels
 
@@ -13,9 +16,21 @@ Pista has not published a stable release. Unless a document explicitly says othe
 
 ## Compatibility policy
 
-Before the first stable release, compatibility changes must be called out in the changelog. Configuration renames should provide aliases, conflict detection, and migration tests when users could reasonably depend on the old key.
+For the documented stable scope of a published version:
 
-After a stable compatibility policy is adopted, public API removals will require advance deprecation notice. Persistent operation-state formats and delivery identities require an explicit migration path regardless of release maturity.
+- Patch versions preserve public CLI, SQL function, configuration and error contracts while fixing defects.
+- Minor versions add compatible behavior. Existing defaults and supported entry points remain compatible unless an explicitly documented experimental feature changes.
+- Incompatible removal or replacement requires a major version and advance deprecation in a supported minor release, with migration guidance and direct compatibility tests.
+
+Configuration renames provide aliases and conflict detection during deprecation.
+Target versions and deployment shapes are supported only within the support
+matrix; release numbers do not imply compatibility with additional Spark or
+Scala baselines. Experimental capabilities remain outside the stable promise.
+
+Persistent operation-state formats and delivery identities require an explicit
+migration path regardless of release maturity. Preserve historical introduced-version
+annotations when advancing the project revision. Follow the [release process](releases.md)
+for publication verification and master preparation.
 
 ## Guarantees
 

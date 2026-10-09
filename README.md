@@ -21,6 +21,12 @@ Structured Streaming is experimental. Connector guarantees depend on the target,
 
 ## Quick start
 
+Published distributions are listed on the [GitHub Releases page](https://github.com/jiangxt2/Pista/releases).
+A source version becomes a stable release only after its corresponding Release is published and verified.
+The first release uses the complete Spark-submit JAR; Maven Central coordinates are not published.
+See the [support scope](docs/SUPPORT_MATRIX.md), [stability policy](docs/STABILITY.md), and
+[release process](docs/releases.md) for candidate validation, migration and development-version rules.
+
 ### Requirements
 
 - JDK 17
