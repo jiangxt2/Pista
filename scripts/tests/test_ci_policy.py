@@ -436,6 +436,31 @@ def test_sbom_generation_excludes_provided_components() -> None:
     assert "-DincludeProvidedScope=false" in script
 
 
+def test_release_candidate_binds_identity_and_scans_the_delivered_sbom() -> None:
+    workflow = (WORKFLOW_DIR / "release-candidate.yml").read_text(encoding="utf-8")
+    scanner = (WORKFLOW_DIR / "osv-scan.yml").read_text(encoding="utf-8")
+    check = workflow.index("prepare_release.py check")
+    package = workflow.index("prepare_release.py package")
+    assert check < workflow.index("mvn -B test")
+    assert workflow.index("mvn -B -Psubmitter-it test") < package
+    assert "expected_commit:" in workflow and "version:" in workflow
+    assert '-Dpista.source.revision="$SOURCE_COMMIT"' in workflow
+    assert "path: target/release/*" in workflow
+    assert "if: always()" in workflow and "**/target/surefire-reports/**" in workflow
+    assert "needs: build-candidate" in workflow
+    assert (
+        "candidate_artifact: ${{ needs.build-candidate.outputs.artifact_name }}"
+        in workflow
+    )
+    assert "inputs.candidate_artifact == ''" in scanner
+    assert "inputs.candidate_artifact != ''" in scanner
+    assert "prepare_release.py verify" in scanner
+    assert (
+        "cp target/release/pista-jvm.cdx.json target/sbom/pista-jvm.cdx.json" in scanner
+    )
+    assert "contents: write" not in workflow
+
+
 def test_jvm_sbom_rejects_provided_components(tmp_path: Path) -> None:
     sbom = tmp_path / "pista-jvm.cdx.json"
     sbom.write_text(

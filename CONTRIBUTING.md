@@ -61,9 +61,12 @@ mvn test -Pit
 
 # Submitter integration tests require the final assembly JAR
 mvn -pl pista-assembly -am package -DskipTests
-mvn -pl pista-batch -am test -Psubmitter-it \
-  -Dpista.it.submitter.jar="$PWD/pista-assembly/target/pista-2.4-SNAPSHOT.jar"
+mvn -pl pista-batch -am test -Psubmitter-it
 ```
+
+The default `pista.it.submitter.jar` follows the reactor revision. Override it only
+when testing an explicitly selected assembly JAR. Use the [release process](docs/releases.md)
+for candidate packaging and the post-release development-version PR.
 
 Run each approved long-duration suite once for an unchanged code and environment state. Preserve failure logs under the suite report directory. Do not skip failing tests to produce a green result.
 

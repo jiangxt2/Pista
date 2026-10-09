@@ -32,7 +32,7 @@
     </modules>
 
     <properties>
-        <revision>2.4-SNAPSHOT</revision>
+        <revision>2.5.0</revision>
 <!--        <java.version>11</java.version>-->
         <java.version>17</java.version>
         <scala.version>2.12.18</scala.version>
@@ -42,6 +42,8 @@
         <minio.image.tag>RELEASE.2025-06-13T11-33-47Z</minio.image.tag>
         <doris.version>3.0.6.2</doris.version>
         <skipDockerCheck>false</skipDockerCheck>
+        <!-- Release candidates stamp the exact checked-out commit; ordinary builds remain development artifacts. -->
+        <pista.source.revision>development</pista.source.revision>
         <!-- Host-side assembly copied into the Spark Submitter IT container. -->
         <pista.it.submitter.jar>${maven.multiModuleProjectDirectory}/pista-assembly/target/pista-${revision}.jar</pista.it.submitter.jar>
         <pista.it.submit.timeout.seconds>600</pista.it.submit.timeout.seconds>
