@@ -1,13 +1,13 @@
 # Support Matrix
 
-This matrix defines the scope of the 2.5.0 GitHub candidate. A stable commitment
-applies only after that version is published on [GitHub Releases](https://github.com/jiangxt2/Pista/releases)
-and its release gates pass. Source presence and a successful build alone do not
-extend the supported deployment scope.
+This matrix defines the scope of the published
+[2.5.0 GitHub Release](https://github.com/jiangxt2/Pista/releases/tag/v2.5.0).
+Development snapshots carry no stable commitment. Source presence and a successful
+build alone do not extend the supported deployment scope.
 
 ## Runtime baseline
 
-| Component | Candidate baseline | Status |
+| Component | 2.5.0 baseline | Status |
 |---|---:|---|
 | JDK | 17 | Current build baseline |
 | Scala | 2.12.18 | Current build baseline |
@@ -20,11 +20,11 @@ extend the supported deployment scope.
 |---|---|---|
 | Parameterized single-file batch SQL | Current | JVM unit and submitter integration tests |
 | Catalyst function catalog | Current | Catalog, registration, interpreted, and code-generation tests |
-| ClickHouse batch adapter | Current candidate | Unit tests plus Docker-backed write, overwrite, routing, and resume tests |
-| Doris batch adapter | Current candidate | Unit tests plus Docker-backed write, partition, transaction, and overwrite tests |
-| Native Iceberg SQL integration | Current candidate | Local Hadoop Catalog CTAS, INSERT, replacement, properties and readable snapshot tests |
+| ClickHouse batch adapter | Current | Unit tests plus Docker-backed write, overwrite, routing, and resume tests |
+| Doris batch adapter | Current | Unit tests plus Docker-backed write, partition, transaction, and overwrite tests |
+| Native Iceberg SQL integration | Current | Local Hadoop Catalog CTAS, INSERT, replacement, properties and readable snapshot tests |
 | Iceberg REST Catalog and additional S3/HDFS deployment combinations | Experimental | Require explicit external-service evidence; the REST suite is excluded from default discovery |
-| Metrics and data-quality collection | Current candidate | JVM unit and Spark-local tests |
+| Metrics and data-quality collection | Current | JVM unit and Spark-local tests |
 | Structured Streaming | Experimental | Spark-local tests; public recovery matrix is incomplete |
 | Kyuubi batch submission | Experimental | The documented external submission baseline does not establish a general recovery or compatibility promise |
 | Spark ML processors / MLflow integration | Removed from Pista | Use Tributo for model training, inference, experiment tracking, artifacts, and registry |

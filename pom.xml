@@ -32,7 +32,7 @@
     </modules>
 
     <properties>
-        <revision>2.5.0</revision>
+        <revision>2.6.0-SNAPSHOT</revision>
 <!--        <java.version>11</java.version>-->
         <java.version>17</java.version>
         <scala.version>2.12.18</scala.version>

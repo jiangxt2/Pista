@@ -19,7 +19,6 @@ REQUIRED_FILES = (
     "CODE_OF_CONDUCT.md",
     "GOVERNANCE.md",
     "MAINTAINERS.md",
-    "CHANGELOG.md",
     "docs/STABILITY.md",
     "docs/SUPPORT_MATRIX.md",
 )
