@@ -5,7 +5,9 @@ stable releases; commands below use 2.5.0 as an example. The
 submission JAR is built for JDK 17, Scala 2.12.18 and Spark 3.5.8. The
 [support matrix](SUPPORT_MATRIX.md) and [stability policy](STABILITY.md) define
 the promise; Experimental features retain their status when a stable release is
-published. Maven Central and PyPI publication are outside this process.
+published. GitHub Release notes are the versioned change history: summarize
+user-visible changes and upgrade notes, and link the full tag comparison.
+Maven Central and PyPI publication are outside this process.
 
 ## Authorization and preparation
 
@@ -66,11 +68,13 @@ python3 -B scripts/prepare_release.py verify --version 2.5.0 \
 This verifies hashes and candidate identity. For optional checksum-only checking,
 run `sha256sum --check SHA256SUMS` inside the downloaded directory.
 
-Reuse successful RC Submitter IT evidence when it exercised the same Assembly JAR
-and the downloaded hashes match. A separate consumer smoke is needed only when
-distribution or entry-point changes leave a concrete runtime coverage gap.
-Approve that additional scope before running it, use the exact candidate JAR,
-and archive its command, result and digest.
+Reuse successful RC Submitter IT evidence only for behavior its assertions cover,
+when it exercised the same Assembly JAR and the downloaded hashes match. Artifact
+identity does not establish behavioral coverage. Add a focused check to the
+relevant candidate suite for each required release behavior without direct test
+evidence. A separate consumer smoke is needed only when the RC suites leave a
+supported distribution or submission path unexercised. Use the exact candidate
+JAR and archive the command, result and digest.
 
 Review license/NOTICE content, dependency attribution, source ownership and
 provenance, secret/PII/private-endpoint checks, vulnerability findings and the
@@ -106,7 +110,7 @@ writer guide. Release publication does not apply production schema migrations.
 After publication verification, create a separate worktree and PR to:
 
 - Set the root `revision` to `2.6.0-SNAPSHOT`; child modules and the Assembly follow the reactor value.
-- Move the published changes into a dated `2.5.0` changelog entry and start a new `Unreleased` section.
+- Keep versioned change history in the GitHub Release notes, including upgrade notes and a full comparison with the previous release tag.
 - Keep released download examples at 2.5.0 while development build paths follow the reactor revision.
 - Preserve existing `.version("2.5")` annotations, which record introduction rather than the current build version.
 - Retain the runtime baseline unless a separately reviewed upgrade provides its required compatibility evidence.
