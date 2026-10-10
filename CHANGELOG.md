@@ -5,6 +5,10 @@ on the [GitHub Releases page](https://github.com/jiangxt2/Pista/releases).
 
 ## Unreleased
 
+No changes yet.
+
+## [2.5.0](https://github.com/jiangxt2/Pista/releases/tag/v2.5.0) - 2026-10-09
+
 ### Added
 
 - English public documentation and project governance files.
@@ -28,7 +32,3 @@ on the [GitHub Releases page](https://github.com/jiangxt2/Pista/releases).
 
 - Removed organization-specific identifiers, internal environment defaults, business-shaped fixtures, and credential-like example values from the public candidate tree.
 - Updated bundled JDBC drivers and changed vulnerability gating to scan release-scoped SBOMs while documenting externally provided Spark dependencies.
-
-After publication, a separate PR moves released changes into a dated release
-entry, opens the next Unreleased section, and advances master to its next
-development revision. Release entries are added only after actual publication.

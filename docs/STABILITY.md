@@ -2,8 +2,9 @@
 
 Published stable [GitHub Releases](https://github.com/jiangxt2/Pista/releases) define
 the versions covered by this policy. A source revision or candidate build is not
-itself a published release. The first release targets version 2.5.0; master moves
-to 2.6.0-SNAPSHOT after publication is verified.
+itself a published release. The first stable release is
+[2.5.0](https://github.com/jiangxt2/Pista/releases/tag/v2.5.0).
+Master uses 2.6.0-SNAPSHOT; development snapshots carry no stable commitment.
 
 ## Stability levels
 

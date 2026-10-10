@@ -1,6 +1,7 @@
 # Release process
 
-This process prepares Pista 2.5.0 as the first stable GitHub distribution. The
+Pista 2.5.0 is the first stable GitHub distribution. This process applies to future
+stable releases; commands below use 2.5.0 as an example. The
 submission JAR is built for JDK 17, Scala 2.12.18 and Spark 3.5.8. The
 [support matrix](SUPPORT_MATRIX.md) and [stability policy](STABILITY.md) define
 the promise; Experimental features retain their status when a stable release is
@@ -14,7 +15,8 @@ tag creation, Release creation and publication. Do not infer publication approva
 from a successful build or a request to prepare the release.
 
 Merge the reviewed preparation PR, then select a clean full commit SHA whose
-reactor revision is 2.5.0. Keep that commit and its candidate artifacts fixed;
+reactor revision matches the approved stable version. Keep that commit and its
+candidate artifacts fixed;
 master may continue development. Preserve existing introduced-version metadata.
 
 The candidate workflow takes the approved `version` and `expected_commit` as
@@ -64,12 +66,11 @@ python3 -B scripts/prepare_release.py verify --version 2.5.0 \
 This verifies hashes and candidate identity. For optional checksum-only checking,
 run `sha256sum --check SHA256SUMS` inside the downloaded directory.
 
-Also run a consumer smoke test from a separate directory using this exact JAR
-on the documented Spark baseline: SQL-file submission, registered functions,
-Spark-native output and required-output failure propagation. Do not substitute a
-module JAR, rebuild the runtime, or count a packaging fixture as a runtime test.
-Archive the command, result and artifact digest. The full Submitter IT evidence
-and this downloaded-consumer check together establish the submission boundary.
+Reuse successful RC Submitter IT evidence when it exercised the same Assembly JAR
+and the downloaded hashes match. A separate consumer smoke is needed only when
+distribution or entry-point changes leave a concrete runtime coverage gap.
+Approve that additional scope before running it, use the exact candidate JAR,
+and archive its command, result and digest.
 
 Review license/NOTICE content, dependency attribution, source ownership and
 provenance, secret/PII/private-endpoint checks, vulnerability findings and the
