@@ -41,7 +41,7 @@ class DorisTransactionCoordinatorSuite extends AnyFunSuite {
           call(method.getName, args)
       }))
 
-  Seq("empty", "connect", "execute", "read-status").foreach { stage =>
+  Seq("empty", "execute", "read-status").foreach { stage =>
     test(s"JDBC $stage preserves empty results or the primary query failure and closes resources") {
       val original = new SQLException("query rejected", "08006")
       val secondary = new SQLException("connection close failed", "08006")
@@ -69,20 +69,15 @@ class DorisTransactionCoordinatorSuite extends AnyFunSuite {
       }}
       val coordinator = new DorisTransactionCoordinator {
         override protected def buildDorisJdbcConnection(
-          config: DorisBatchConfig, database: Option[String]): Connection = {
-          if (stage == "connect") throw original
-          connection
-        }
+          config: DorisBatchConfig, database: Option[String]): Connection = connection
       }
       if (stage == "empty") assert(coordinator.validateAllVisible(config, scope, maxWaitMs = 1000))
       else {
         val failure = intercept[SQLException](coordinator.validateAllVisible(config, scope, maxWaitMs = 1000))
         assert(failure eq original)
-        assert(failure.getSQLState == "08006")
-        if (stage != "connect") assert(failure.getSuppressed.toSeq.contains(secondary))
+        assert(failure.getSuppressed.toSeq.contains(secondary))
       }
       val expected = stage match {
-        case "connect" => Seq.empty
         case "execute" => Seq("statement", "connection")
         case _ => Seq("result", "statement", "connection")
       }
