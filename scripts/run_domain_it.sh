@@ -44,7 +44,7 @@ run_requested_shard() {
       ;;
     doris)
       run_shard doris \
-        "com.pista.spark.sql.doris.meta,com.pista.spark.sql.connector.doris" 21
+        "com.pista.spark.sql.doris.meta,com.pista.spark.sql.connector.doris" 26
       ;;
     iceberg)
       run_native_shard iceberg "com.pista.spark.sql.batch.iceberg" 5

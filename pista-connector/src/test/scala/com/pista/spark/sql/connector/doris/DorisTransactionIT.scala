@@ -7,10 +7,15 @@ import com.pista.spark.sql.test.util.TestDataGenerator
 
 import java.net.{HttpURLConnection, URL}
 import java.nio.charset.StandardCharsets
-import java.sql.SQLException
+import java.sql.{Connection, SQLException}
+import org.apache.spark.TaskContext
+import org.apache.spark.sql.{DataFrame, Row}
+import scala.collection.mutable.ListBuffer
 import java.util.Base64
 
 class DorisTransactionIT extends DorisITSupport {
+
+  override protected def sparkSessionConf: Map[String, String] = Map("spark.master" -> "local[2,2]")
 
   test("Doris Connector 2PC transaction visible after commit VISIBLE data visible") {
     val (database, table) = createTransactionTable("it_doris_2pc_commit")
@@ -20,18 +25,17 @@ class DorisTransactionIT extends DorisITSupport {
       labelPrefix = TestDataGenerator.uniqueName("pista_it_2pc_commit"),
       enable2PC = true)
 
-    val result = new DorisConcurrentWriter(
-      config,
-      DorisConcurrentContext(clusterName = None, metaManager = None),
-      twoColumnSource(1 to 20),
-      System.currentTimeMillis()).write()
+    var runtimePrefix = ""
+    val result = trackedWriter(config, twoColumnSource(1 to 20)) { writeConfig =>
+      runtimePrefix = writeConfig.labelPrefix
+    }.write()
 
     assert(result.success)
     assert(result.rowCount == 20L)
     assert(queryLong(s"SELECT COUNT(*) FROM `$database`.`$table`") == 20L)
 
     val statuses = queryColumn(
-      s"SHOW TRANSACTION FROM `$database` WHERE label LIKE '${config.labelPrefix}%'")(_.getString("TransactionStatus"))
+      s"SHOW TRANSACTION FROM `$database` WHERE label LIKE '${runtimePrefix}-%'")(_.getString("TransactionStatus"))
     assert(statuses.nonEmpty)
     assert(statuses.forall(_ == "VISIBLE"), s"Transaction status should all be VISIBLE, actual is $statuses")
   }
@@ -44,11 +48,12 @@ class DorisTransactionIT extends DorisITSupport {
       labelPrefix = TestDataGenerator.uniqueName("pista_it_2pc_abort"),
       enable2PC = true)
 
-    val txnId = createPreCommittedTransaction(config, "901,precommitted\n")
+    val scope = DorisTransactionScope.create(config.labelPrefix)
+    val txnId = createPreCommittedTransaction(config.copy(labelPrefix = scope.labelPrefix + "-pending"), "901,precommitted\n")
     val coordinator = new DorisTransactionCoordinator()
-    assert(coordinator.queryTransactionStatuses(config).contains("PRECOMMITTED"))
-    assert(coordinator.abortByLabel(config) == 1)
-    assert(coordinator.queryTransactionStatuses(config).contains("ABORTED"),
+    assert(coordinator.queryTransactionStatuses(config, scope).contains("PRECOMMITTED"))
+    assert(coordinator.abortByLabel(config, scope) == 1)
+    assert(coordinator.queryTransactionStatuses(config, scope).contains("ABORTED"),
       s"transaction $txnId has not converged ABORTED")
     assert(queryLong(s"SELECT COUNT(*) FROM `$database`.`$table`") == 0L)
   }
@@ -56,37 +61,38 @@ class DorisTransactionIT extends DorisITSupport {
   test("rejected transaction query cannot validate an invisible PRECOMMITTED transaction") {
     val (database, table) = createTransactionTable("it_doris_query_failure")
     val config = batchConfig(database, table, enable2PC = true)
-    val coordinator = new DorisTransactionCoordinator {
-      def abortExact(txnId: String): Boolean = send2pcAbort(txnId, config)
-    }
-    val txnId = createPreCommittedTransaction(config, "901,pending\n")
-    def state: Seq[String] = queryColumn(
-      s"SHOW TRANSACTION FROM `$database` WHERE id = ${txnId.toLong}")(_.getString("TransactionStatus"))
+    val coordinator = new DorisTransactionCoordinator()
+    val scope = DorisTransactionScope.create(config.labelPrefix)
+    val txnId = createPreCommittedTransaction(config.copy(labelPrefix = scope.labelPrefix + "-pending"), "901,pending\n")
     try {
-      assert(state == Seq("PRECOMMITTED"))
+      assert(transactionState(config, txnId) == "PRECOMMITTED")
       val failure = intercept[SQLException] {
-        coordinator.validateAllVisible(config.copy(password = "test-password"), maxWaitMs = 1000)
+        coordinator.validateAllVisible(config.copy(password = "test-password"), scope, maxWaitMs = 1000)
       }
       assert(failure.getErrorCode == 1045 && failure.getSQLState == "28000")
-      assert(state == Seq("PRECOMMITTED"))
+      assert(transactionState(config, txnId) == "PRECOMMITTED")
       assert(queryLong(s"SELECT COUNT(*) FROM `$database`.`$table`") == 0L)
     } finally {
-      assert(coordinator.abortExact(txnId))
-      assert(state == Seq("ABORTED"))
+      abortExact(config, txnId)
     }
   }
 
-  test("transaction preparation authentication failure records FAILURE after RUNNING") {
-    val (database, table) = createTransactionTable("it_doris_prepare_failure")
+  test("transaction verification authentication failure records FAILURE after publication") {
+    val (database, table) = createTransactionTable("it_doris_verify_failure")
     val config = batchConfig(database, table, enable2PC = true)
-      .copy(password = "test-password")
     withMetadataContext() { context =>
-      val failure = intercept[SQLException] {
-        new DorisConcurrentWriter(config, context, twoColumnSource(Seq(1)), System.currentTimeMillis()).write()
+      val writer = new DorisConcurrentWriter(config, context, twoColumnSource(1 to 2), System.currentTimeMillis()) {
+        override protected def createTransactionCoordinator(): DorisTransactionCoordinator =
+          new DorisTransactionCoordinator {
+            override protected def buildDorisJdbcConnection(
+              config: DorisBatchConfig, database: Option[String]): Connection =
+              super.buildDorisJdbcConnection(config.copy(password = "test-password"), database)
+          }
       }
+      val failure = intercept[SQLException](writer.write())
       assert(failure.getErrorCode == 1045 && failure.getSQLState == "28000")
       assertTaskState(config, DorisRecordStatus.FAILURE.id, writtenRows = -1L)
-      assert(queryLong(s"SELECT COUNT(*) FROM `$database`.`$table`") == 0L)
+      assert(queryLong(s"SELECT COUNT(*) FROM `$database`.`$table`") == 2L)
     }
   }
 
@@ -94,14 +100,123 @@ class DorisTransactionIT extends DorisITSupport {
     val (database, table) = createTransactionTable("it_doris_empty_2pc")
     val config = batchConfig(database, table, enable2PC = true)
     withMetadataContext() { context =>
-      val result = new DorisConcurrentWriter(
-        config, context, twoColumnSource(Seq.empty), System.currentTimeMillis()).write()
+      var runtimePrefix = ""
+      val result = trackedWriter(config, twoColumnSource(Seq.empty), context) { writeConfig =>
+        runtimePrefix = writeConfig.labelPrefix
+      }.write()
       assert(result.success && result.rowCount == 0L)
-      assert(queryColumn(s"SHOW TRANSACTION FROM `$database` WHERE label LIKE '${config.labelPrefix}%'")(
+      assert(queryColumn(s"SHOW TRANSACTION FROM `$database` WHERE label LIKE '${runtimePrefix}-%'")(
         _.getString("TransactionStatus")).isEmpty)
       assert(queryLong(s"SELECT COUNT(*) FROM `$database`.`$table`") == 0L)
       assertTaskState(config, DorisRecordStatus.SUCCESS.id, writtenRows = 0L)
     }
+  }
+
+  for (sameTable <- Seq(false, true)) {
+    test(s"shared configured prefix leaves other transactions untouched when sameTable=$sameTable") {
+      val (database, table) = createTransactionTable("it_doris_scope")
+      val victim = if (sameTable) table else createTransactionTable("it_doris_victim")._2
+      val prefix = TestDataGenerator.uniqueName("pista_shared")
+      val config = batchConfig(database, table, labelPrefix = prefix, enable2PC = true)
+      val otherRun = DorisTransactionScope.create(prefix)
+      val victimConfig = config.copy(table = victim)
+      val ids = ListBuffer.empty[String]
+      try {
+        Seq(prefix + "_external", otherRun.labelPrefix + "-pending", prefix + "_aborted").foreach { label =>
+          ids += createPreCommittedTransaction(victimConfig.copy(labelPrefix = label), "901,pending\n")
+        }
+        abortExact(victimConfig, ids.last)
+        var runtimePrefix = ""
+        assert(trackedWriter(config, twoColumnSource(1 to 2)) { writeConfig =>
+          runtimePrefix = writeConfig.labelPrefix
+        }.write().success)
+        assert(ids.map(transactionState(victimConfig, _)).toSeq == Seq("PRECOMMITTED", "PRECOMMITTED", "ABORTED"))
+        val statuses = queryColumn(s"SHOW TRANSACTION FROM `$database` WHERE label LIKE '$runtimePrefix-%'")(
+          _.getString("TransactionStatus"))
+        assert(statuses.nonEmpty && statuses.forall(_ == "VISIBLE"))
+        assert(queryLong(s"SELECT COUNT(*) FROM `$database`.`$table`") == 2L)
+        if (!sameTable) assert(queryLong(s"SELECT COUNT(*) FROM `$database`.`$victim`") == 0L)
+      } finally ids.foreach { id =>
+        if (transactionState(victimConfig, id) == "PRECOMMITTED") abortExact(victimConfig, id)
+      }
+    }
+  }
+
+  for (failureMode <- Seq("write", "timeout")) {
+    test(s"$failureMode cleanup aborts only the current invocation") {
+      val (database, table) = createTransactionTable("it_doris_owned_cleanup")
+      val (_, victim) = createTransactionTable("it_doris_foreign_cleanup")
+      val config = batchConfig(database, table, enable2PC = true)
+      val victimConfig = config.copy(table = victim, labelPrefix = config.labelPrefix + "_other")
+      val foreignId = createPreCommittedTransaction(victimConfig, "901,foreign\n")
+      var ownedId = ""
+      try {
+        val writer = trackedWriter(config, twoColumnSource(1 to 2), visibilityWaitMs = 100) { writeConfig =>
+          ownedId = createPreCommittedTransaction(
+            writeConfig.copy(labelPrefix = writeConfig.labelPrefix + "-pending"), "902,owned\n")
+          if (failureMode == "write") throw new IllegalStateException("injected connector failure")
+        }
+        intercept[Exception](writer.write())
+        assert(ownedId.nonEmpty && transactionState(config, ownedId) == "ABORTED")
+        assert(transactionState(victimConfig, foreignId) == "PRECOMMITTED")
+        assert(queryLong(s"SELECT COUNT(*) FROM `$database`.`$table`") == (if (failureMode == "write") 0L else 2L))
+        assert(queryLong(s"SELECT COUNT(*) FROM `$database`.`$victim`") == 0L)
+      } finally {
+        abortExact(victimConfig, foreignId)
+        if (ownedId.nonEmpty && transactionState(config, ownedId) == "PRECOMMITTED") abortExact(config, ownedId)
+      }
+    }
+  }
+
+  test("a Spark input task retry keeps the runtime namespace and produces one visible copy") {
+    val (database, table) = createTransactionTable("it_doris_scope_retry")
+    val config = batchConfig(database, table, labelPrefix = "prefix.*_%'\\" + "\u4e2d" * 500, enable2PC = true)
+    val input = twoColumnSource(1 to 4)
+    val retried = input.rdd.mapPartitions { rows =>
+      val task = TaskContext.get()
+      if (task.partitionId() == 0 && task.attemptNumber() == 0)
+        throw new IllegalStateException("injected first input attempt failure")
+      rows.map(row => Row(row.getInt(0), s"attempt-${task.attemptNumber()}"))
+    }
+    var runtimePrefix = ""
+    val result = trackedWriter(config, spark.createDataFrame(retried, input.schema)) { writeConfig =>
+      runtimePrefix = writeConfig.labelPrefix
+    }.write()
+    assert(result.success && result.rowCount == 4L)
+    assert(queryLong(s"SELECT COUNT(*) FROM `$database`.`$table` WHERE value = 'attempt-1'") > 0L)
+    assert(queryLong(s"SELECT COUNT(DISTINCT id) FROM `$database`.`$table`") == 4L)
+    val labels = queryColumn(s"SHOW TRANSACTION FROM `$database` WHERE label LIKE '$runtimePrefix-%'")(
+      _.getString("Label"))
+    assert(labels.nonEmpty && labels.forall(label => label.startsWith(runtimePrefix + "-") && label.length <= 128))
+  }
+
+  private def trackedWriter(
+    config: DorisBatchConfig, source: DataFrame,
+    context: DorisConcurrentContext = DorisConcurrentContext(None, None), visibilityWaitMs: Int = 30000
+  )(beforeWrite: DorisBatchConfig => Unit): DorisConcurrentWriter =
+    new DorisConcurrentWriter(config, context, source, System.currentTimeMillis()) {
+      override protected def createConnectorWriter(
+        writeConfig: DorisBatchConfig, sourceDf: DataFrame, timestamp: Long): SparkDorisConnectorWriter = {
+        beforeWrite(writeConfig)
+        super.createConnectorWriter(writeConfig, sourceDf, timestamp)
+      }
+      override protected def createTransactionCoordinator(): DorisTransactionCoordinator =
+        new DorisTransactionCoordinator {
+          override def validateAllVisible(config: DorisBatchConfig, scope: DorisTransactionScope, maxWaitMs: Int): Boolean =
+            super.validateAllVisible(config, scope, visibilityWaitMs)
+        }
+    }
+
+  private def transactionState(config: DorisBatchConfig, txnId: String): String =
+    queryColumn(s"SHOW TRANSACTION FROM `${config.database}` WHERE id = ${txnId.toLong}")(
+      _.getString("TransactionStatus")).head
+
+  private def abortExact(config: DorisBatchConfig, txnId: String): Unit = {
+    val coordinator = new DorisTransactionCoordinator {
+      def abort(): Boolean = send2pcAbort(txnId, config)
+    }
+    assert(coordinator.abort())
+    assert(transactionState(config, txnId) == "ABORTED")
   }
 
   private def createTransactionTable(prefix: String): (String, String) =

@@ -52,6 +52,14 @@ psql --set ON_ERROR_STOP=1 --file sqls/postgre/migrations/doris_task_metadata_te
 
 The migration preserves task rows, keys, indexes, triggers, and partition-record foreign keys. Schedule it during a maintenance window because [ALTER TABLE acquires a table lock](https://www.postgresql.org/docs/16/sql-altertable.html). Do not rerun the table-initialization scripts against an existing store; those scripts recreate tables. Applications do not migrate the store automatically. If a selector exceeds a legacy column limit, the error identifies the column, requested character count, and migration path before Doris preparation begins.
 
+## Doris transaction labels
+
+With `spark.pista.doris.connector.enable2PC=true`, each actual connector write derives a fresh runtime label prefix from `spark.pista.doris.labelPrefix`. The prefix is `pista_<16 hexadecimal digest characters>_<32 hexadecimal run ID characters>`. It contains 55 ASCII characters, leaving room for the stage, task-attempt, partition and timestamp suffix added by Connector 25.2.0. The configured prefix still contributes to the stable metadata task key; the random run ID does not.
+
+Transaction queries, visibility checks and failure cleanup use only this invocation's namespace, with a literal prefix-and-separator check on returned labels. A shared configured prefix or a table name in a 2PC URL is not evidence of transaction ownership. Writes no longer abort earlier runs before starting. Reconcile historical transactions by exact transaction ID or allow Doris to expire them according to its configured timeout.
+
+Runtime namespaces isolate transaction control between writes; they do not establish the accepted task-attempt set, safe replay after publication, or cross-run exactly-once delivery. Visibility checks retain their existing treatment of failed attempts within the current run. The non-2PC path is unchanged.
+
 ## Error policies
 
 The global policy and SQL, processor, output, and materialization overrides accept `fail-fast` or `continue-on-error`. Continue policies control scheduling only; they do not convert required failures into success.

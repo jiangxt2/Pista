@@ -168,8 +168,8 @@ class DorisConcurrentWriterSuite extends AnyFunSuite with BeforeAndAfterAll {
     assert(writer.cleanupTempTableCalled)
   }
 
-  for (stage <- Seq("prepare", "verify"); metadataFails <- Seq(false, true)) {
-    test(s"transaction $stage failure retains its cause when metadataFails=$metadataFails") {
+  for (metadataFails <- Seq(false, true)) {
+    test(s"transaction verification failure retains its cause when metadataFails=$metadataFails") {
       val original = new SQLException("transaction query rejected", "28000", 1045)
       val secondary = new IllegalStateException("metadata unavailable")
       val meta = new RecordingMetaManager {
@@ -181,18 +181,17 @@ class DorisConcurrentWriterSuite extends AnyFunSuite with BeforeAndAfterAll {
       val writer = new TestableDorisConcurrentWriter(
         minimalConfig().copy(enable2PC = true, overwrite = true),
         DorisConcurrentContext(Some("test_cluster"), Some(meta)), spark)
-      if (stage == "prepare") writer.abortByLabelException = Some(original)
-      else writer.validateAllVisibleException = Some(original)
+      writer.validateAllVisibleException = Some(original)
 
       val failure = intercept[SQLException](writer.write())
       assert(failure eq original)
       assert(failure.getSuppressed.toSeq == (if (metadataFails) Seq(secondary) else Seq.empty))
       assert(meta.failureMessage.isDefined)
       assert(meta.successRowCount.isEmpty)
-      assert(writer.connectorCalled == (stage == "verify"))
-      assert(writer.tablePrepared == (stage == "verify"))
+      assert(writer.connectorCalled == true)
+      assert(writer.tablePrepared == true)
       assert(!writer.cleanupTempTableCalled)
-      assert(writer.abortByLabelCallCount == 1)
+      assert(writer.abortByLabelCallCount == 0)
     }
   }
 
@@ -294,7 +293,8 @@ class DorisConcurrentWriterSuite extends AnyFunSuite with BeforeAndAfterAll {
 
     val ex = intercept[Exception] { writer.write() }
     assert(ex.getMessage.contains("connector error"))
-    assert(writer.abortByLabelCallCount == 2) // Phase 2 cleanup and abortAndCleanup rollback
+    assert(writer.abortByLabelCallCount == 1)
+    assert(writer.observedScopes.forall(_.labelPrefix == writer.connectorConfig.get.labelPrefix)) // Current-run failure cleanup only
     assert(meta.failureMessage.isDefined)
   }
 
@@ -312,7 +312,8 @@ class DorisConcurrentWriterSuite extends AnyFunSuite with BeforeAndAfterAll {
     val ex = intercept[Exception] { writer.write() }
     assert(ex.getMessage.contains("replace failed"))
     assert(writer.cleanupTempTableCalled)
-    assert(writer.abortByLabelCallCount == 2) // Phase 2 cleanup and abortAndCleanup rollback
+    assert(writer.abortByLabelCallCount == 1)
+    assert(writer.observedScopes.forall(_.labelPrefix == writer.connectorConfig.get.labelPrefix)) // Current-run failure cleanup only
     assert(meta.failureMessage.isDefined)
   }
 
@@ -335,7 +336,8 @@ class DorisConcurrentWriterSuite extends AnyFunSuite with BeforeAndAfterAll {
     assert(ex.getMessage.contains("replace partitions failed"))
     assert(writer.cleanupTempPartitionsCalled)
     assert(!writer.cleanupTempTableCalled)
-    assert(writer.abortByLabelCallCount == 2) // Phase 2 cleanup and abortAndCleanup rollback
+    assert(writer.abortByLabelCallCount == 1)
+    assert(writer.observedScopes.forall(_.labelPrefix == writer.connectorConfig.get.labelPrefix)) // Current-run failure cleanup only
     assert(meta.failureMessage.isDefined)
   }
 
@@ -355,7 +357,8 @@ class DorisConcurrentWriterSuite extends AnyFunSuite with BeforeAndAfterAll {
 
     val ex = intercept[Exception] { writer.write() }
     assert(ex.getMessage.contains("not all transactions visible within timeout"))
-    assert(writer.abortByLabelCallCount == 2) // Phase 2 Cleanup + Phase 6 Timeout Rollback
+    assert(writer.abortByLabelCallCount == 1)
+    assert(writer.observedScopes.forall(_.labelPrefix == writer.connectorConfig.get.labelPrefix)) // Current-run timeout cleanup only
     assert(meta.failureMessage.isDefined)
   }
 
@@ -372,8 +375,32 @@ class DorisConcurrentWriterSuite extends AnyFunSuite with BeforeAndAfterAll {
 
     val ex = intercept[Exception] { writer.write() }
     assert(ex.getMessage.contains("not all transactions visible within timeout"))
-    assert(writer.abortByLabelCallCount == 1) // Only Phase 2 cleanup, no additional abort in Phase 6
+    assert(writer.abortByLabelCallCount == 0) // No cleanup before writes or for COMMITTED transactions
     assert(meta.failureMessage.isDefined)
+  }
+
+  for (mode <- Seq("append", "table", "partition")) {
+    test(s"$mode uses one fresh runtime scope per invocation and keeps metadata identity stable") {
+      val config = minimalConfig().copy(enable2PC = true, overwrite = mode != "append",
+        partitionDate = if (mode == "partition") "20260407" else "")
+      val registered = scala.collection.mutable.ListBuffer.empty[String]
+      val meta = new RecordingMetaManager {
+        override def upsertRunning(taskId: String, database: String, table: String,
+          partitionDate: String, writeMode: String, sourceTable: Option[String],
+          partitionFilter: Option[String]): Unit = registered += taskId
+      }
+      val writer = new TestableDorisConcurrentWriter(config,
+        DorisConcurrentContext(Some("test_cluster"), Some(meta)), spark)
+      val stableId = writer.exposedBuildTaskId(config, Some("test_cluster"))
+      assert(writer.write().success)
+      val first = writer.connectorConfig.get.labelPrefix
+      assert(writer.write().success)
+      val second = writer.connectorConfig.get.labelPrefix
+      assert(first != second && first != config.labelPrefix)
+      assert(writer.observedScopes.map(_.labelPrefix).toSeq == Seq(first, second))
+      assert(writer.abortByLabelCallCount == 0)
+      assert(registered.toSeq == Seq(stableId, stableId))
+    }
   }
 
   // ==================== Helper Methods ====================
@@ -445,6 +472,8 @@ class TestableDorisConcurrentWriter(
   spark.range(1).toDF("id"),
   System.currentTimeMillis()
 ) {
+  val observedScopes = scala.collection.mutable.ListBuffer.empty[DorisTransactionScope]
+  var connectorConfig: Option[DorisBatchConfig] = None
   var abortByLabelCallCount: Int = 0
   var cleanupTempTableCalled: Boolean = false
   var cleanupTempPartitionsCalled: Boolean = false
@@ -458,7 +487,6 @@ class TestableDorisConcurrentWriter(
   var validateAllVisibleException: Option[Exception] = None
   var transactionStatuses: Seq[String] = Seq.empty
   var abortByLabelResult: Int = 0
-  var abortByLabelException: Option[Exception] = None
 
   var replaceTableException: Option[Exception] = None
   var replacePartitionsException: Option[Exception] = None
@@ -470,6 +498,7 @@ class TestableDorisConcurrentWriter(
   ): SparkDorisConnectorWriter = new SparkDorisConnectorWriter(config, df, ts) {
     override def write(): BatchWriteResult = {
       connectorCalled = true
+      connectorConfig = Some(config)
       connectorWriteException match {
         case Some(ex) => throw ex
         case None     => connectorWriteResult
@@ -478,14 +507,18 @@ class TestableDorisConcurrentWriter(
   }
 
   override protected def createTransactionCoordinator(): DorisTransactionCoordinator = new DorisTransactionCoordinator() {
-    override def validateAllVisible(config: DorisBatchConfig, maxWaitMs: Int): Boolean = {
+    override def validateAllVisible(config: DorisBatchConfig, scope: DorisTransactionScope, maxWaitMs: Int): Boolean = {
+      observedScopes += scope
       validateAllVisibleException.foreach(throw _)
       validateAllVisibleResult
     }
-    override def queryTransactionStatuses(config: DorisBatchConfig): Seq[String] = transactionStatuses
-    override def abortByLabel(config: DorisBatchConfig): Int = {
+    override def queryTransactionStatuses(config: DorisBatchConfig, scope: DorisTransactionScope): Seq[String] = {
+      observedScopes += scope
+      transactionStatuses
+    }
+    override def abortByLabel(config: DorisBatchConfig, scope: DorisTransactionScope): Int = {
+      observedScopes += scope
       abortByLabelCallCount += 1
-      abortByLabelException.foreach(throw _)
       abortByLabelResult
     }
   }

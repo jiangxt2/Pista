@@ -63,18 +63,11 @@ class DorisConcurrentWriter(
       batchConfig.resolvePartitionFilter()
     )) }
 
-    // Phase 2: Write Clean Environment Before Writing (2PC)
-    if (batchConfig.enable2PC) {
-      try {
-        val coordinator = createTransactionCoordinator()
-        val aborted = inStage("transaction.prepare", taskId) { coordinator.abortByLabel(batchConfig) }
-        if (aborted > 0) logWarning(s"[DorisConcurrentWriter] Aborted $aborted stale pre-committed transactions")
-      } catch {
-        case NonFatal(error) =>
-          markFailurePreserving(taskId, error)
-          throw error
-      }
-    }
+    // Keep the stable business task ID above; transaction ownership is per write invocation.
+    val transactionScope = if (batchConfig.enable2PC)
+      Some(DorisTransactionScope.create(batchConfig.labelPrefix)) else None
+    val runtimeConfig = transactionScope.map(scope => batchConfig.copy(labelPrefix = scope.labelPrefix))
+      .getOrElse(batchConfig)
 
     // FE node is parsed by DorisFENodeResolver in buildBatchConfig (leader takes precedence), take the first one directly.
     val feNode = batchConfig.fenodes.split(",").head.trim
@@ -106,13 +99,13 @@ class DorisConcurrentWriter(
 
     // Phase 4: Connector Write (Change the target table to a temporary table when whole-table overwrite write occurs)
     val writeConfig = tableSwapMgrOpt match {
-      case Some(mgr) => batchConfig.copy(fenodes = feNode, table = mgr.tempTableName)
-      case None      => batchConfig.copy(fenodes = feNode)
+      case Some(mgr) => runtimeConfig.copy(fenodes = feNode, table = mgr.tempTableName)
+      case None      => runtimeConfig.copy(fenodes = feNode)
     }
     val result = try {
       inStage("write", taskId) { createConnectorWriter(writeConfig, sourceDf, jobTimestamp).write() }
     } catch {
-      case e: Exception => abortAndCleanup(e, "Write failed", taskId, tableSwapMgrOpt, partitionMgrOpt)
+      case e: Exception => abortAndCleanup(e, "Write failed", taskId, transactionScope, tableSwapMgrOpt, partitionMgrOpt)
     }
 
     // Phase 5a: Complete Table Overwrite Replacement (ALTER TABLE REPLACE)
@@ -120,7 +113,7 @@ class DorisConcurrentWriter(
       try {
         inStage("publish.table", taskId) { tableSwapMgrOpt.foreach(_.replaceTable()) }
       } catch {
-        case e: Exception => abortAndCleanup(e, "ALTER TABLE REPLACE failed", taskId, tableSwapMgrOpt, partitionMgrOpt)
+        case e: Exception => abortAndCleanup(e, "ALTER TABLE REPLACE failed", taskId, transactionScope, tableSwapMgrOpt, partitionMgrOpt)
       }
     }
 
@@ -129,22 +122,22 @@ class DorisConcurrentWriter(
       try {
         inStage("publish.partitions", taskId) { partitionMgrOpt.foreach(_.replacePartitions()) }
       } catch {
-        case e: Exception => abortAndCleanup(e, "REPLACE PARTITION failed", taskId, tableSwapMgrOpt, partitionMgrOpt)
+        case e: Exception => abortAndCleanup(e, "REPLACE PARTITION failed", taskId, transactionScope, tableSwapMgrOpt, partitionMgrOpt)
       }
     }
 
     // Phase 6: 2PC strict validation (polling wait) VISIBLE)
-    if (result.success && batchConfig.enable2PC) {
+    if (result.success) transactionScope.foreach { scope =>
       try {
         val coordinator = createTransactionCoordinator()
         val isVisible = inStage("verify.transactions", taskId) {
-          coordinator.validateAllVisible(batchConfig, maxWaitMs = 30000)
+          coordinator.validateAllVisible(batchConfig, scope, maxWaitMs = 30000)
         }
         if (!isVisible) {
-          val statuses = coordinator.queryTransactionStatuses(batchConfig)
+          val statuses = coordinator.queryTransactionStatuses(batchConfig, scope)
           val hasPrecommitted = statuses.exists(s => s == "PRECOMMITTED" || s == "PREPARE")
           if (hasPrecommitted) {
-            val aborted = Try(coordinator.abortByLabel(batchConfig)).getOrElse(0)
+            val aborted = Try(coordinator.abortByLabel(batchConfig, scope)).getOrElse(0)
             logWarning(s"[DorisConcurrentWriter] Timeout with PRECOMMITTED transactions, aborted $aborted")
           } else if (statuses.nonEmpty) {
             logWarning(s"[DorisConcurrentWriter] Timeout but all transactions COMMITTED, data likely visible soon. " +
@@ -201,12 +194,15 @@ class DorisConcurrentWriter(
     e:                Exception,
     msg:              String,
     taskId:           String,
+    transactionScope: Option[DorisTransactionScope],
     tableSwapMgrOpt:  Option[DorisTableSwapManager],
     partitionMgrOpt:  Option[DorisPartitionManager]
   ): Nothing = {
-    if (batchConfig.enable2PC) Try {
-      val aborted = createTransactionCoordinator().abortByLabel(batchConfig)
-      logWarning(s"[DorisConcurrentWriter] $msg, aborted $aborted pre-committed transactions")
+    transactionScope.foreach { scope =>
+      Try {
+        val aborted = createTransactionCoordinator().abortByLabel(batchConfig, scope)
+        logWarning(s"[DorisConcurrentWriter] $msg, aborted $aborted pre-committed transactions")
+      }
     }
     tableSwapMgrOpt.foreach(m => Try(m.cleanupTempTable()))
     partitionMgrOpt.foreach(m => Try(m.cleanupTempPartitions()))

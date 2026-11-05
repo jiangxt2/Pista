@@ -30,10 +30,8 @@ class DorisTransactionCoordinator extends TransactionCoordinator with DorisJdbcS
     3600
   }
 
-  override def queryPreCommittedTxns(config: DorisBatchConfig): Seq[PreCommittedTxn] = {
-    val sql = s"SHOW TRANSACTION FROM `${config.database}` WHERE label LIKE '${escapeSqlString(config.labelPrefix)}%'"
-
-    queryShowTransaction(sql, config).filter(_("status") == "PRECOMMITTED").map { row =>
+  override def queryPreCommittedTxns(config: DorisBatchConfig, scope: DorisTransactionScope): Seq[PreCommittedTxn] = {
+    queryOwnedTransactions(config, scope).filter(_("status") == "PRECOMMITTED").map { row =>
       PreCommittedTxn(
         txnId = row("txn_id"),
         label = row("label"),
@@ -77,8 +75,8 @@ class DorisTransactionCoordinator extends TransactionCoordinator with DorisJdbcS
    *    - existent Meta Historical entries without transactions (non-first run): conservative error (transactions may have expired and their status is unknown)
    *    - No Meta History (first run): Considered as passed validation:
    */
-  override def validateTransactionByLabel(config: DorisBatchConfig): Boolean =
-    validateTransactionByLabel(config, hasHistory = false)
+  override def validateTransactionByLabel(config: DorisBatchConfig, scope: DorisTransactionScope): Boolean =
+    validateTransactionByLabel(config, scope, hasHistory = false)
 
   /**
    * Validate the final state of transactions prefixed with Label (with historical awareness).
@@ -86,18 +84,18 @@ class DorisTransactionCoordinator extends TransactionCoordinator with DorisJdbcS
    * @param hasHistory Whether metadata contains a prior transaction record. If true and SHOW TRANSACTION returns no record,
    *                   Mark transactions as expired to return false conservatively to avoid duplicate writes.
    */
-  def validateTransactionByLabel(config: DorisBatchConfig, hasHistory: Boolean): Boolean = {
-    val sql = s"SHOW TRANSACTION FROM `${config.database}` WHERE label LIKE '${escapeSqlString(config.labelPrefix)}%'"
-
-    val rows = queryShowTransaction(sql, config)
+  override def validateTransactionByLabel(
+    config: DorisBatchConfig, scope: DorisTransactionScope, hasHistory: Boolean
+  ): Boolean = {
+    val rows = queryOwnedTransactions(config, scope)
     if (rows.isEmpty) {
       if (hasHistory) {
-        logWarning(s"[TransactionCoordinator] No transactions found for label prefix '${config.labelPrefix}', " +
+        logWarning(s"[TransactionCoordinator] No transactions found for label prefix '${scope.labelPrefix}', " +
           "but meta history exists. Previous transaction may have been cleaned up. " +
           "Refusing to proceed to avoid potential duplicate data.")
         false
       } else {
-        logInfo(s"[TransactionCoordinator] No prior transactions found for label prefix '${config.labelPrefix}', " +
+        logInfo(s"[TransactionCoordinator] No prior transactions found for label prefix '${scope.labelPrefix}', " +
           "treating as clean state (first run or transactions already finalized)")
         true
       }
@@ -109,27 +107,28 @@ class DorisTransactionCoordinator extends TransactionCoordinator with DorisJdbcS
 
       if (hasPending) {
         logWarning(s"[TransactionCoordinator] Found pending transactions (PREPARE/PRECOMMITTED) " +
-          s"for label prefix '${config.labelPrefix}'")
+          s"for label prefix '${scope.labelPrefix}'")
         false
       } else if (hasFailure || !allSuccess) {
         logWarning(s"[TransactionCoordinator] Transaction validation failed for label prefix " +
-          s"'${config.labelPrefix}', statuses=${statuses.mkString(",")}")
+          s"'${scope.labelPrefix}', statuses=${statuses.mkString(",")}")
         false
       } else {
         logInfo(s"[TransactionCoordinator] Transaction validation passed for label prefix " +
-          s"'${config.labelPrefix}', statuses=${statuses.mkString(",")}")
+          s"'${scope.labelPrefix}', statuses=${statuses.mkString(",")}")
         true
       }
     }
   }
 
-  override def validateAllVisible(config: DorisBatchConfig, maxWaitMs: Int = 30000): Boolean = {
-    val sql = s"SHOW TRANSACTION FROM `${config.database}` WHERE label LIKE '${escapeSqlString(config.labelPrefix)}%'"
+  override def validateAllVisible(
+    config: DorisBatchConfig, scope: DorisTransactionScope, maxWaitMs: Int = 30000
+  ): Boolean = {
     val startMs = System.currentTimeMillis()
     val intervalMs = 2000
 
     while (System.currentTimeMillis() - startMs < maxWaitMs) {
-      val rows = queryShowTransaction(sql, config)
+      val rows = queryOwnedTransactions(config, scope)
 
       if (rows.isEmpty) {
         logInfo("[TransactionCoordinator] No transactions found, treating as clean")
@@ -164,8 +163,8 @@ class DorisTransactionCoordinator extends TransactionCoordinator with DorisJdbcS
     false
   }
 
-  override def abortByLabel(config: DorisBatchConfig): Int = {
-    val txns = queryPreCommittedTxns(config)
+  override def abortByLabel(config: DorisBatchConfig, scope: DorisTransactionScope): Int = {
+    val txns = queryPreCommittedTxns(config, scope)
     if (txns.isEmpty) {
       logInfo("[TransactionCoordinator] No pre-committed transactions to abort")
       0
@@ -193,13 +192,11 @@ class DorisTransactionCoordinator extends TransactionCoordinator with DorisJdbcS
    *
    * @return A list of transaction status strings (e.g., Seq("VISIBLE", "COMMITTED")), returning an empty list when no transaction exists.
    */
-  def queryTransactionStatuses(config: DorisBatchConfig): Seq[String] = {
-    val sql = s"SHOW TRANSACTION FROM `${config.database}` WHERE label LIKE '${escapeSqlString(config.labelPrefix)}%'"
-    queryShowTransaction(sql, config).map(_("status"))
-  }
+  def queryTransactionStatuses(config: DorisBatchConfig, scope: DorisTransactionScope): Seq[String] =
+    queryOwnedTransactions(config, scope).map(_("status"))
 
-  override def abortStaleTxns(config: DorisBatchConfig): Int = {
-    val preCommittedTxns = queryPreCommittedTxns(config)
+  override def abortStaleTxns(config: DorisBatchConfig, scope: DorisTransactionScope): Int = {
+    val preCommittedTxns = queryPreCommittedTxns(config, scope)
     val now = System.currentTimeMillis()
     // Deprecated: use the fixed one-hour timeout (3600 seconds).
     val timeoutMs = 3600 * 1000L
@@ -285,7 +282,7 @@ class DorisTransactionCoordinator extends TransactionCoordinator with DorisJdbcS
    * Execute the SHOW TRANSACTION command and return the structured result.
    *
    * SHOW TRANSACTION is a MySQL style command that does not support PreparedStatement parameterization,
-   * Therefore, the caller must ensure SQL injection security themselves (by using escapeSqlString / numeric validation).
+   * Callers use a generated label namespace or a validated numeric transaction ID.
    *
    * Return column (Doris 3.x): TransactionId, Label, Coordinator, TransactionStatus,
    * LoadJobSourceType, PrepareTime, PreCommitTime, CommitTime, FinishTime, Reason,
@@ -310,7 +307,12 @@ class DorisTransactionCoordinator extends TransactionCoordinator with DorisJdbcS
       }
     }
 
-  /** Prevent SQL Injection: Escape string values in SHOW TRANSACTION WHERE label */
-  private def escapeSqlString(s: String): String =
-    s.replace("\\", "\\\\").replace("'", "\\'")
+  private def queryOwnedTransactions(
+    config: DorisBatchConfig, scope: DorisTransactionScope
+  ): Seq[Map[String, String]] = {
+    // This SHOW path uses Java regex matching in Doris 3.0.6.2. The generated prefix
+    // contains only ASCII letters, digits and underscores; still enforce literal ownership.
+    val sql = s"SHOW TRANSACTION FROM `${config.database}` WHERE label LIKE '${scope.labelPrefix}-%'"
+    queryShowTransaction(sql, config).filter(row => row.get("label").exists(scope.ownsLabel))
+  }
 }
