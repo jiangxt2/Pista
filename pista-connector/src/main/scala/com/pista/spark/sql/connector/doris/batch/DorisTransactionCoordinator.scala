@@ -295,27 +295,19 @@ class DorisTransactionCoordinator extends TransactionCoordinator with DorisJdbcS
     sql: String,
     config: DorisBatchConfig
   ): Seq[Map[String, String]] =
-    try {
-      val conn = buildDorisJdbcConnection(config, Some(config.database))
-      try {
-        val stmt = conn.createStatement()
-        val rs = stmt.executeQuery(sql)
-        val rows = Iterator.continually(rs.next()).takeWhile(identity).map { _ =>
-          Map(
-            "txn_id"       -> Option(rs.getString("TransactionId")).getOrElse(""),
-            "label"        -> Option(rs.getString("Label")).getOrElse(""),
-            "status"       -> Option(Try(rs.getString("TransactionStatus")).getOrElse(null)).getOrElse(""),
-            "txn_begin_ts" -> Option(rs.getTimestamp("PrepareTime")).map(_.getTime.toString).getOrElse("0")
-          )
-        }.toList
-        rs.close()
-        stmt.close()
-        rows
-      } finally conn.close()
-    } catch {
-      case e: Exception =>
-        logError(s"[TransactionCoordinator] Transaction query failed with ${e.getClass.getSimpleName}")
-        Seq.empty
+    Using.resource(buildDorisJdbcConnection(config, Some(config.database))) { conn =>
+      Using.resource(conn.createStatement()) { stmt =>
+        Using.resource(stmt.executeQuery(sql)) { rs =>
+          Iterator.continually(rs.next()).takeWhile(identity).map { _ =>
+            Map(
+              "txn_id"       -> Option(rs.getString("TransactionId")).getOrElse(""),
+              "label"        -> Option(rs.getString("Label")).getOrElse(""),
+              "status"       -> Option(rs.getString("TransactionStatus")).getOrElse(""),
+              "txn_begin_ts" -> Option(rs.getTimestamp("PrepareTime")).map(_.getTime.toString).getOrElse("0")
+            )
+          }.toList
+        }
+      }
     }
 
   /** Prevent SQL Injection: Escape string values in SHOW TRANSACTION WHERE label */
