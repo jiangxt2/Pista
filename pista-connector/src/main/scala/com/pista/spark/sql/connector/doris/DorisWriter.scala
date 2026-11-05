@@ -41,6 +41,15 @@ class DorisWriter
       logDebug(s"[$engineName] Atomic overwrite requested, selecting Connector mode")
       val transformedDf = transformPartitionColumnIfNeeded(df, conf)
       writeViaConnector(transformedDf, config)
+    } else if (conf.get(SubmitterConf.DORIS_CONNECTOR_ENABLE_2PC)) {
+      if (!config.mode.equalsIgnoreCase("append"))
+        throw PistaErrors.dorisWriterError(
+          "Explicit Doris 2PC requires output.mode=append unless overwrite is requested")
+      if (getOption(config.options, "force.jdbc", "false").equalsIgnoreCase("true"))
+        throw PistaErrors.dorisWriterError(
+          "Explicit Doris 2PC append is incompatible with force.jdbc=true")
+      logDebug(s"[$engineName] Explicit 2PC requested, selecting Connector mode")
+      writeViaConnector(df, config)
     } else {
       writeInternalTemplate(df, stats, config)
     }
@@ -59,7 +68,7 @@ class DorisWriter
 
     try {
       val batchConfig = buildBatchConfig(conf, metaCtxOpt, overwriteRequested(conf, config))
-      if (batchConfig.overwrite) validateOverwriteTarget(config, batchConfig)
+      if (batchConfig.overwrite || batchConfig.enable2PC) validateConnectorTarget(config, batchConfig)
       val context = DorisConcurrentContext(
         clusterName = conf.getOption(SubmitterConf.DORIS_CLUSTER_NAME.key),
         metaManager = metaCtxOpt.map(_.manager)
@@ -115,12 +124,18 @@ class DorisWriter
     config.mode.equalsIgnoreCase("overwrite") || dorisOverwrite
   }
 
-  private def validateOverwriteTarget(config: OutputConfig, batchConfig: DorisBatchConfig): Unit = {
-    val requested = normalizeTableIdentifier(config.path.getOrElse("").trim, batchConfig.database)
+  private def validateConnectorTarget(config: OutputConfig, batchConfig: DorisBatchConfig): Unit = {
+    val path = config.path.getOrElse("").trim
+    val requested = if (batchConfig.overwrite) normalizeTableIdentifier(path, batchConfig.database)
+      else normalizeTableIdentifier(path)
     val configured = s"${batchConfig.database}.${batchConfig.table}"
     if (requested != configured) {
-      val reason = "Conflicting Doris overwrite target: spark.pista.output.path must match " +
+      val operation = if (batchConfig.overwrite) "overwrite" else "2PC append"
+      val conflict = s"Conflicting Doris $operation target: spark.pista.output.path must match " +
         "spark.pista.doris.database and spark.pista.doris.table"
+      val reason = if (!batchConfig.overwrite && !path.contains("."))
+        s"$conflict. Specify spark.pista.output.path as db.table."
+      else conflict
       logError(s"[DorisWriter] stage=configuration.target outcome=failed reason=$reason")
       throw PistaErrors.dorisWriterError(reason)
     }
