@@ -34,8 +34,8 @@ class DorisWriterSuite extends AnyFunSuite with BeforeAndAfterAll {
     var connectorCalled = false
     var jdbcCalled = false
     var connectorDf: DataFrame = _
-    def route(df: DataFrame, config: OutputConfig): Unit =
-      writeInternal(df, DataStats.empty.copy(rowCount = Some(1L)), config)
+    def route(df: DataFrame, config: OutputConfig, rows: Option[Long] = Some(1L)): Unit =
+      writeInternal(df, DataStats.empty.copy(rowCount = rows), config)
     def connector(df: DataFrame, config: OutputConfig): Unit = super.writeViaConnector(df, config)
     override protected def writeViaConnector(df: DataFrame, config: OutputConfig): Unit = {
       connectorCalled = true
@@ -45,12 +45,14 @@ class DorisWriterSuite extends AnyFunSuite with BeforeAndAfterAll {
       batchSize: Int, properties: Properties, mode: String): Unit = jdbcCalled = true
   }
 
-  test("generic overwrite selects atomic connector routing even for small forced-JDBC output") {
-    val session = spark.newSession()
-    val writer = new RoutingWriter
-    writer.route(session.range(1).toDF(), output("OvErWrItE", forceJdbc = true))
-    assert(writer.connectorCalled)
-    assert(!writer.jdbcCalled)
+  test("generic overwrite takes precedence over forced JDBC with or without explicit 2PC") {
+    Seq(false, true).foreach { enable2PC =>
+      val session = spark.newSession()
+      if (enable2PC) session.conf.set(SubmitterConf.DORIS_CONNECTOR_ENABLE_2PC.key, "true")
+      val writer = new RoutingWriter
+      writer.route(session.range(1).toDF(), output("OvErWrItE", forceJdbc = true))
+      assert(writer.connectorCalled && !writer.jdbcCalled)
+    }
   }
 
   test("Doris overwrite and partition conversion read the active session configuration") {
@@ -68,6 +70,90 @@ class DorisWriterSuite extends AnyFunSuite with BeforeAndAfterAll {
     writer.route(spark.newSession().range(1).toDF(), output("append"))
     assert(writer.jdbcCalled)
     assert(!writer.connectorCalled)
+  }
+
+  test("explicit 2PC append reads the DataFrame session and selects Connector at every size") {
+    val session = spark.newSession()
+    session.conf.set(SubmitterConf.DORIS_CONNECTOR_ENABLE_2PC.key, "true")
+    Seq(Some(0L), Some(1L), Some(99999L), Some(100000L), None).foreach { rows =>
+      val writer = new RoutingWriter
+      writer.route(session.range(1).toDF(), output("ApPeNd"), rows)
+      assert(writer.connectorCalled && !writer.jdbcCalled)
+    }
+  }
+
+  test("ordinary append preserves threshold and forced JDBC routing with 2PC disabled") {
+    val session = spark.newSession()
+    session.conf.set(SubmitterConf.DORIS_CONNECTOR_ENABLE_2PC.key, "false")
+    Seq((Some(99999L), false, true), (Some(100000L), false, false),
+      (None, false, false), (Some(100000L), true, true)).foreach {
+      case (rows, forced, jdbc) =>
+        val writer = new RoutingWriter
+        writer.route(session.range(1).toDF(), output("append", forced), rows)
+        assert(writer.jdbcCalled == jdbc && writer.connectorCalled != jdbc)
+    }
+  }
+
+  test("explicit 2PC rejects forced JDBC before Connector metadata initialization") {
+    val session = spark.newSession()
+    session.conf.set(SubmitterConf.DORIS_CONNECTOR_ENABLE_2PC.key, "true")
+    session.conf.set(SubmitterConf.META_HOST.key, "127.0.0.1")
+    Seq(Some(1L), Some(100000L), None).foreach { rows =>
+      val writer = new RoutingWriter
+      val failure = intercept[PistaDorisException] {
+        writer.route(session.range(1).toDF(), output("append", forceJdbc = true), rows)
+      }
+      assert(failure.getMessage.contains("incompatible with force.jdbc=true"))
+      assert(!writer.connectorCalled && !writer.jdbcCalled)
+    }
+  }
+
+  test("invalid 2PC configuration fails before either append route") {
+    val session = spark.newSession()
+    session.conf.set(SubmitterConf.DORIS_CONNECTOR_ENABLE_2PC.key, "invalid")
+    val writer = new RoutingWriter
+    intercept[IllegalArgumentException](writer.route(session.range(1).toDF(), output("append")))
+    assert(!writer.connectorCalled && !writer.jdbcCalled)
+  }
+
+  test("explicit 2PC rejects other modes while ordinary JDBC routing is preserved") {
+    val session = spark.newSession()
+    val source = session.range(1).toDF()
+    Seq("ignore", "errorifexists").foreach { mode =>
+      session.conf.set(SubmitterConf.DORIS_CONNECTOR_ENABLE_2PC.key, "false")
+      val ordinary = new RoutingWriter
+      ordinary.route(source, output(mode))
+      assert(ordinary.jdbcCalled && !ordinary.connectorCalled)
+
+      session.conf.set(SubmitterConf.DORIS_CONNECTOR_ENABLE_2PC.key, "true")
+      val writer = new RoutingWriter
+      val failure = intercept[PistaDorisException](writer.route(source, output(mode)))
+      assert(failure.getMessage.contains("requires output.mode=append"))
+      assert(!writer.connectorCalled && !writer.jdbcCalled)
+    }
+  }
+
+  test("explicit 2PC append validates the Connector destination before writing") {
+    val session = spark.newSession()
+    session.conf.set(SubmitterConf.DORIS_CONNECTOR_ENABLE_2PC.key, "true")
+    session.conf.set(SubmitterConf.DORIS_FENODES.key, "127.0.0.1:8030")
+    val writer = new DorisWriter
+    val missing = intercept[PistaConfigException] {
+      writer.write(session.range(1).toDF(), output("append"))
+    }
+    assert(missing.getMessage.contains(SubmitterConf.DORIS_DATABASE.key))
+    session.conf.set(SubmitterConf.DORIS_DATABASE.key, "pista_test")
+    session.conf.set(SubmitterConf.DORIS_TABLE.key, "other")
+    val conflict = intercept[PistaDorisException] {
+      writer.write(session.range(1).toDF(), output("append"))
+    }
+    assert(conflict.getMessage.contains("Conflicting Doris 2PC append target"))
+
+    session.conf.set(SubmitterConf.DORIS_TABLE.key, "target")
+    val unqualified = intercept[PistaDorisException] {
+      writer.write(session.range(1).toDF(), output("append").copy(path = Some("target")))
+    }
+    assert(unqualified.getMessage.contains("Specify spark.pista.output.path as db.table"))
   }
 
   test("generic overwrite cannot hide an invalid Doris overwrite setting") {

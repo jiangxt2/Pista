@@ -86,7 +86,10 @@ private[sql] object DorisConf {
 
   val DORIS_CONNECTOR_ENABLE_2PC: ConfigEntryWithDefault[Boolean] =
     PistaConfigBuilder("doris.connector.enable2PC")
-      .doc("Is Exactly-Once 2PC transaction enabled (transaction_timeout_second must be increased in Doris FE when enabled)")
+      .doc("Enable official Connector two-phase commit, including small appends. " +
+        "Only append and overwrite are supported when enabled. " +
+        "Append with force.jdbc=true is incompatible; overwrite retains Connector precedence. " +
+        "This does not guarantee cross-run exactly-once delivery; configure Doris FE transaction timeouts accordingly.")
       .version("2.4")
       .booleanConf
       .createWithDefault(false)
