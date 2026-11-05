@@ -7,6 +7,8 @@ import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.funsuite.AnyFunSuite
 
+import java.sql.SQLException
+
 /**
  *DorisConcurrentWriter Unit Test*
  *
@@ -164,6 +166,34 @@ class DorisConcurrentWriterSuite extends AnyFunSuite with BeforeAndAfterAll {
     assert(result eq original)
     assert(result.getSuppressed.toSeq.contains(secondary))
     assert(writer.cleanupTempTableCalled)
+  }
+
+  for (stage <- Seq("prepare", "verify"); metadataFails <- Seq(false, true)) {
+    test(s"transaction $stage failure retains its cause when metadataFails=$metadataFails") {
+      val original = new SQLException("transaction query rejected", "28000", 1045)
+      val secondary = new IllegalStateException("metadata unavailable")
+      val meta = new RecordingMetaManager {
+        override def markFailure(taskId: String, errorMessage: String): Unit = {
+          super.markFailure(taskId, errorMessage)
+          if (metadataFails) throw secondary
+        }
+      }
+      val writer = new TestableDorisConcurrentWriter(
+        minimalConfig().copy(enable2PC = true, overwrite = true),
+        DorisConcurrentContext(Some("test_cluster"), Some(meta)), spark)
+      if (stage == "prepare") writer.abortByLabelException = Some(original)
+      else writer.validateAllVisibleException = Some(original)
+
+      val failure = intercept[SQLException](writer.write())
+      assert(failure eq original)
+      assert(failure.getSuppressed.toSeq == (if (metadataFails) Seq(secondary) else Seq.empty))
+      assert(meta.failureMessage.isDefined)
+      assert(meta.successRowCount.isEmpty)
+      assert(writer.connectorCalled == (stage == "verify"))
+      assert(writer.tablePrepared == (stage == "verify"))
+      assert(!writer.cleanupTempTableCalled)
+      assert(writer.abortByLabelCallCount == 1)
+    }
   }
 
   test("partition preparation failure cleans temporary partitions and retains the original error") {
@@ -425,8 +455,10 @@ class TestableDorisConcurrentWriter(
   var connectorWriteException: Option[Exception] = None
 
   var validateAllVisibleResult: Boolean = true
+  var validateAllVisibleException: Option[Exception] = None
   var transactionStatuses: Seq[String] = Seq.empty
   var abortByLabelResult: Int = 0
+  var abortByLabelException: Option[Exception] = None
 
   var replaceTableException: Option[Exception] = None
   var replacePartitionsException: Option[Exception] = None
@@ -446,10 +478,14 @@ class TestableDorisConcurrentWriter(
   }
 
   override protected def createTransactionCoordinator(): DorisTransactionCoordinator = new DorisTransactionCoordinator() {
-    override def validateAllVisible(config: DorisBatchConfig, maxWaitMs: Int): Boolean = validateAllVisibleResult
+    override def validateAllVisible(config: DorisBatchConfig, maxWaitMs: Int): Boolean = {
+      validateAllVisibleException.foreach(throw _)
+      validateAllVisibleResult
+    }
     override def queryTransactionStatuses(config: DorisBatchConfig): Seq[String] = transactionStatuses
     override def abortByLabel(config: DorisBatchConfig): Int = {
       abortByLabelCallCount += 1
+      abortByLabelException.foreach(throw _)
       abortByLabelResult
     }
   }

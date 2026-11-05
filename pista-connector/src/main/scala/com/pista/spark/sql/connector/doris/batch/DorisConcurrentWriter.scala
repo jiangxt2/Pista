@@ -65,9 +65,15 @@ class DorisConcurrentWriter(
 
     // Phase 2: Write Clean Environment Before Writing (2PC)
     if (batchConfig.enable2PC) {
-      val coordinator = createTransactionCoordinator()
-      val aborted = inStage("transaction.prepare", taskId) { coordinator.abortByLabel(batchConfig) }
-      if (aborted > 0) logWarning(s"[DorisConcurrentWriter] Aborted $aborted stale pre-committed transactions")
+      try {
+        val coordinator = createTransactionCoordinator()
+        val aborted = inStage("transaction.prepare", taskId) { coordinator.abortByLabel(batchConfig) }
+        if (aborted > 0) logWarning(s"[DorisConcurrentWriter] Aborted $aborted stale pre-committed transactions")
+      } catch {
+        case NonFatal(error) =>
+          markFailurePreserving(taskId, error)
+          throw error
+      }
     }
 
     // FE node is parsed by DorisFENodeResolver in buildBatchConfig (leader takes precedence), take the first one directly.

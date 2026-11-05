@@ -2,6 +2,8 @@ package com.pista.spark.sql.connector.doris.batch
 
 import org.scalatest.funsuite.AnyFunSuite
 
+import java.lang.reflect.{InvocationHandler, Method, Proxy}
+import java.sql.{Connection, ResultSet, SQLException, Statement}
 import scala.collection.mutable.ListBuffer
 
 /**
@@ -27,6 +29,57 @@ class DorisTransactionCoordinatorSuite extends AnyFunSuite {
       sql:    String,
       config: DorisBatchConfig
     ): Seq[Map[String, String]] = rows
+  }
+
+  private def jdbcStub[T](kind: Class[T])(call: (String, Array[AnyRef]) => AnyRef): T =
+    kind.cast(Proxy.newProxyInstance(getClass.getClassLoader, Array[Class[_]](kind),
+      new InvocationHandler {
+        override def invoke(proxy: Any, method: Method, args: Array[AnyRef]): AnyRef =
+          call(method.getName, args)
+      }))
+
+  Seq("empty", "execute", "read-status").foreach { stage =>
+    test(s"JDBC $stage preserves empty results or the primary query failure and closes resources") {
+      val original = new SQLException("query rejected", "08006")
+      val secondary = new SQLException("connection close failed", "08006")
+      val closed = ListBuffer.empty[String]
+      val result = jdbcStub(classOf[ResultSet]) { (method, args) => method match {
+        case "next" => java.lang.Boolean.valueOf(stage == "read-status")
+        case "getString" if args(0) == "TransactionStatus" => throw original
+        case "getString" => "value"
+        case "close" => closed += "result"; null
+        case other => throw new UnsupportedOperationException(other)
+      }}
+      val statement = jdbcStub(classOf[Statement]) { (method, _) => method match {
+        case "executeQuery" if stage == "execute" => throw original
+        case "executeQuery" => result
+        case "close" => closed += "statement"; null
+        case other => throw new UnsupportedOperationException(other)
+      }}
+      val connection = jdbcStub(classOf[Connection]) { (method, _) => method match {
+        case "createStatement" => statement
+        case "close" =>
+          closed += "connection"
+          if (stage != "empty") throw secondary
+          null
+        case other => throw new UnsupportedOperationException(other)
+      }}
+      val coordinator = new DorisTransactionCoordinator {
+        override protected def buildDorisJdbcConnection(
+          config: DorisBatchConfig, database: Option[String]): Connection = connection
+      }
+      if (stage == "empty") assert(coordinator.validateAllVisible(config, maxWaitMs = 1000))
+      else {
+        val failure = intercept[SQLException](coordinator.validateAllVisible(config, maxWaitMs = 1000))
+        assert(failure eq original)
+        assert(failure.getSuppressed.toSeq.contains(secondary))
+      }
+      val expected = stage match {
+        case "execute" => Seq("statement", "connection")
+        case _ => Seq("result", "statement", "connection")
+      }
+      assert(closed.toSeq == expected)
+    }
   }
 
   // ==================== validateTransactionByLabel with hasHistory ====================
