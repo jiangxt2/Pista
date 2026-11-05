@@ -39,6 +39,8 @@ The connector and atomic-overwrite paths register metadata before temporary-tabl
 
 INFO logs identify the task and target by stable fingerprints and summarize write mode, metadata availability, partition count, field lengths, and the final outcome. DEBUG logs show preparation, writing, publication, verification, and metadata-stage durations. ERROR logs include the failing stage, exception class, SQLSTATE when available, and actionable schema diagnostics. `taskRef` is the first 12 hexadecimal characters of SHA-256 over the stored task ID; it correlates writer and metadata events. Connection strings, credentials, predicates, partition values, and raw database exception messages are excluded from these diagnostics. Successful low-level metadata operations use DEBUG to avoid repeating the final write summary.
 
+For 2PC writes, the driver creates one fresh transaction namespace per writer invocation and passes it to the connector, verification and failure cleanup. Metadata continues to use its stable business task key. Cleanup only aborts owned PRECOMMITTED transactions by exact ID; it never sweeps the shared configured label prefix. See [Doris transaction labels](../reference/configuration.md#doris-transaction-labels) for the label format and recovery limitations. An exception after writing or publication does not prove that no rows became visible; reconcile the target before replaying a failed write.
+
 ## Extension rules
 
 - Fail before side effects when configuration or capability requirements are missing.
