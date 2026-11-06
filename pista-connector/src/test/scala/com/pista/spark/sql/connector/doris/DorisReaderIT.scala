@@ -61,6 +61,8 @@ class DorisReaderIT extends DorisITSupport {
       val combined = read(Seq("trim(value) = 'one'", "id > 0"), Seq("id"), force)
       assert(combined.columns.toSeq == Seq("id"))
       assert(combined.collect().map(_.getInt(0)).toSeq == Seq(1))
+      val disjoint = read(Seq("trim(value) = 'one'", "id = 2"), Seq("id"), force)
+      assert(disjoint.collect().isEmpty)
     }
     assert(read(Seq("id = 9"), Seq("id")).collect().isEmpty)
     intercept[Exception] { read(Seq("id ="), Seq("id")).collect() }
