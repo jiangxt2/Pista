@@ -10,6 +10,8 @@ The current JVM batch CLI does not expose every reader path as a first-class sub
 
 For JDBC reads, predicates are Spark SQL filter expressions combined with AND. Filtering occurs before column selection, and selected columns are returned in the requested order. Invalid expressions and unknown columns fail instead of being ignored. Spark may push supported filters and projections to the database; correctness does not depend on pushdown.
 
+The ClickHouse JDBC reader uses the configured credentials for schema discovery, row-count estimation, and reads. Its inferred schema follows Spark JDBC; an explicitly supplied schema remains subject to Spark's JDBC schema validation. Connector-based reading remains a separate path.
+
 ## Writer contract
 
 A writer receives a DataFrame and `OutputConfig` with path, format, save mode, partition columns, and options. Spark-native formats use DataFrameWriter. Custom formats use the writer registry.
