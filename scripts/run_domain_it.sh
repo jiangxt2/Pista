@@ -40,7 +40,7 @@ run_requested_shard() {
   case "$1" in
     clickhouse)
       run_shard clickhouse \
-        "com.pista.spark.sql.clickhouse.meta,com.pista.spark.sql.connector.clickhouse" 10
+        "com.pista.spark.sql.clickhouse.meta,com.pista.spark.sql.connector.clickhouse" 11
       ;;
     doris)
       run_shard doris \
