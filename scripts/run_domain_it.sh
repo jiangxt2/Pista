@@ -40,11 +40,11 @@ run_requested_shard() {
   case "$1" in
     clickhouse)
       run_shard clickhouse \
-        "com.pista.spark.sql.clickhouse.meta,com.pista.spark.sql.connector.clickhouse" 8
+        "com.pista.spark.sql.clickhouse.meta,com.pista.spark.sql.connector.clickhouse" 9
       ;;
     doris)
       run_shard doris \
-        "com.pista.spark.sql.doris.meta,com.pista.spark.sql.connector.doris" 29
+        "com.pista.spark.sql.doris.meta,com.pista.spark.sql.connector.doris" 30
       ;;
     iceberg)
       run_native_shard iceberg "com.pista.spark.sql.batch.iceberg" 5
