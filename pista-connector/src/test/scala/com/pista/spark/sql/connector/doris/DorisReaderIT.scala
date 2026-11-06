@@ -1,0 +1,69 @@
+package com.pista.spark.sql.connector.doris
+
+import com.pista.spark.sql.execution.datasources.reader.{InputConfig, ReaderRegistry}
+import org.apache.spark.sql.DataFrame
+
+class DorisReaderIT extends DorisITSupport {
+  test("JDBC reader applies predicates before the requested projection") {
+    val (database, table) = createDorisTable("it_doris_reader",
+      """(id INT, value VARCHAR(128)) DUPLICATE KEY(id)
+        |DISTRIBUTED BY HASH(id) BUCKETS 2 PROPERTIES ("replication_num" = "2")""".stripMargin)
+    executeDoris(s"INSERT INTO `$database`.`$table` VALUES (1, 'one'), (2, 'two')")
+    val config = InputConfig(enabled = true, path = Some(s"$database.$table"), format = "doris",
+      options = Map("doris.fenodes" -> fenodes, "doris.query.port" -> feQueryPort.toString,
+        "doris.user" -> "root", "doris.password" -> "", "force.jdbc" -> "true"))
+
+    def read(predicates: Seq[String] = Nil, columns: Seq[String] = Nil,
+             force: Boolean = true): DataFrame = {
+      val options = if (force) config.options else config.options - "force.jdbc"
+      val df = ReaderRegistry.read(spark, config.copy(predicates = predicates, columns = columns, options = options))
+      assert(df.queryExecution.optimizedPlan.toString.contains("JDBCRelation"))
+      df
+    }
+
+    val all = read()
+    assert(all.columns.toSeq == Seq("id", "value"))
+    val allRows = all.collect()
+    assert(allRows.map(_.getInt(0)).toSet == Set(1, 2))
+    val directRows = queryColumn(s"SELECT id, value FROM `$database`.`$table` ORDER BY id") {
+      result => (result.getInt(1), result.getString(2))
+    }
+    assert(directRows == Seq((1, "one"), (2, "two")))
+    val charWidth = withDorisConnection { connection =>
+      val statement = connection.createStatement()
+      try {
+        val result = statement.executeQuery(s"SELECT value FROM `$database`.`$table` WHERE 1 = 0")
+        try {
+          val metadata = result.getMetaData
+          if (metadata.getColumnType(1) == java.sql.Types.CHAR) Some(metadata.getPrecision(1))
+          else None
+        } finally result.close()
+      } finally statement.close()
+    }
+    // Spark pads JDBC CHAR values when scanning, even when Doris declared VARCHAR.
+    val expectedRows = directRows.map { case (id, value) =>
+      (charWidth.fold(value)(width => value.padTo(width, ' ')), id)
+    }.toSet
+    assert(allRows.map(row => (row.getString(1), row.getInt(0))).toSet == expectedRows)
+    val filtered = read(Seq("id = 1"))
+    assert(filtered.columns.toSeq == Seq("id", "value"))
+    assert(filtered.collect().map(_.getInt(0)).toSeq == Seq(1))
+    Seq(true, false).foreach { force =>
+      val originalCase = read(Seq("id = 1"), Seq("id"), force)
+      assert(originalCase.columns.toSeq == Seq("id"))
+      assert(originalCase.collect().map(_.getInt(0)).toSeq == Seq(1))
+    }
+    val projected = read(columns = Seq("value", "id"))
+    assert(projected.columns.toSeq == Seq("value", "id"))
+    assert(projected.collect().map(row => (row.getString(0), row.getInt(1))).toSet ==
+      expectedRows)
+    Seq(true, false).foreach { force =>
+      val combined = read(Seq("trim(value) = 'one'", "id > 0"), Seq("id"), force)
+      assert(combined.columns.toSeq == Seq("id"))
+      assert(combined.collect().map(_.getInt(0)).toSeq == Seq(1))
+    }
+    assert(read(Seq("id = 9"), Seq("id")).collect().isEmpty)
+    intercept[Exception] { read(Seq("id ="), Seq("id")).collect() }
+    intercept[Exception] { read(columns = Seq("missing_column")).collect() }
+  }
+}

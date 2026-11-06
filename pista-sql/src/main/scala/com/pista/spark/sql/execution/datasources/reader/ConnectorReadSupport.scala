@@ -2,6 +2,7 @@ package com.pista.spark.sql.execution.datasources.reader
 
 import com.pista.spark.sql.execution.datasources.ConnectorSupport
 import org.apache.spark.sql.{DataFrame, DataFrameReader, SparkSession}
+import org.apache.spark.sql.functions.col
 import org.apache.spark.sql.types.StructType
 
 /**
@@ -50,16 +51,21 @@ trait ConnectorReadSupport extends ConnectorSupport {
     val tableName = requireValidIdentifier(extractTableName(config.path.get))
     val properties = buildJdbcProperties(config.options)
 
+    def readJdbc(): DataFrame = {
+      val filtered = readViaJdbc(spark, jdbcUrl, tableName, properties, schema, config.predicates)
+      if (config.columns.isEmpty) filtered else {
+        val selected = config.columns.map(name => col(s"`${name.replace("`", "``")}`"))
+        filtered.select(selected: _*)
+      }
+    }
+
     // Check if JDBC is forced.
     val forceJdbc = getOption(config.options, "force.jdbc", "false").toLowerCase == "true"
 
     if (forceJdbc) {
       // Force JDBC usage
       logInfo(s"[$engineName] Force using JDBC (force.jdbc=true)")
-      readViaJdbc(
-        spark, jdbcUrl, tableName, properties, schema,
-        config.predicates
-      )
+      readJdbc()
     } else {
       // Estimate data volume to choose read mode
       val estimatedRows = estimateRowCount(jdbcUrl, tableName, properties)
@@ -67,10 +73,7 @@ trait ConnectorReadSupport extends ConnectorSupport {
       if (estimatedRows.exists(_ < smallDataThreshold)) {
         // Small dataset, use JDBC
         logInfo(s"[$engineName] Using JDBC for small data (${estimatedRows.get} rows < $smallDataThreshold)")
-        readViaJdbc(
-          spark, jdbcUrl, tableName, properties, schema,
-          config.predicates
-        )
+        readJdbc()
       } else {
         // Large dataset or unknown, use Connector
         val rowInfo = estimatedRows.map(r => s"$r rows >= $smallDataThreshold").getOrElse("unknown size")

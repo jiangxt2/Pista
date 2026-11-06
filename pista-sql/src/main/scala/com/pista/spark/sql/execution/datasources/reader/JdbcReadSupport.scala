@@ -96,13 +96,6 @@ trait JdbcReadSupport extends Logging {
       reader = reader.option(key.toString, value.toString)
     }
 
-    // Apply Predicate Pushdown
-    if (predicates.nonEmpty) {
-      val combinedPredicate = predicates.mkString(" AND ")
-      logInfo(s"[$engineName] Applying predicate pushdown: $combinedPredicate")
-      reader = reader.option(JDBCOptions.JDBC_PUSHDOWN_PREDICATE, "true")
-    }
-
     // Apply partition parallelism for reading
     partitionColumn match {
       case Some(col) if numPartitions > 1 =>
@@ -117,7 +110,7 @@ trait JdbcReadSupport extends Logging {
         // Read from single shard.
     }
 
-    val df = reader.load()
+    val df = predicates.foldLeft(reader.load())((current, predicate) => current.filter(predicate))
     logInfo(s"[$engineName] Successfully created DataFrame via JDBC")
     df
   }
