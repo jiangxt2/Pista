@@ -24,8 +24,16 @@ class ClickHouseReader
   override def supportsPushdown: Boolean = true
   override def supportsPartitionPruning: Boolean = true
 
-  override protected def buildJdbcProperties(options: Map[String, String]): java.util.Properties =
-    buildClickHouseJdbcProperties(options)
+  override protected def buildJdbcProperties(options: Map[String, String]): java.util.Properties = {
+    val properties = new java.util.Properties()
+    val authKeys = Seq("clickhouse.username", "clickhouse.user", "user", "clickhouse.password", "password")
+    if (authKeys.exists(options.contains)) {
+      val (user, password) = getJdbcAuth(options)
+      properties.setProperty("user", user)
+      properties.setProperty("password", password)
+    }
+    properties
+  }
 
   override def inferSchema(spark: SparkSession, config: InputConfig): Option[StructType] = {
     val path = config.path.get

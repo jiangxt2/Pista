@@ -22,7 +22,6 @@ class ClickHouseReaderAuthSchemaIT extends ClickHouseITSupport {
     val expected = spark.read.format("jdbc")
       .option("url", s"jdbc:clickhouse://${endpoint(0)}:${endpoint(1)}/$database")
       .option("dbtable", table).option("driver", "com.clickhouse.jdbc.ClickHouseDriver")
-      .option("http_connection_provider", "HTTP_URL_CONNECTION")
       .option("user", ckContainer.username).option("password", ckContainer.userPassword).load()
     val expectedSchema = expected.schema
     assert(expectedSchema("id").nullable && expectedSchema("note").nullable)
