@@ -5,6 +5,8 @@ import com.pista.spark.sql.execution.datasources.writer.ValidationResult
 import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.apache.spark.sql.types.StructType
 
+import scala.util.control.NonFatal
+
 /**
  * ClickHouse reader - supports both JDBC and Connector methods
  *
@@ -22,8 +24,30 @@ class ClickHouseReader
   override def supportsPushdown: Boolean = true
   override def supportsPartitionPruning: Boolean = true
 
-  override def inferSchema(spark: SparkSession, config: InputConfig): Option[StructType] =
-    super[JdbcReadSupport].inferSchema(spark, config)
+  override protected def buildJdbcProperties(options: Map[String, String]): java.util.Properties = {
+    val properties = new java.util.Properties()
+    val authKeys = Seq("clickhouse.username", "clickhouse.user", "user", "clickhouse.password", "password")
+    if (authKeys.exists(options.contains)) {
+      val (user, password) = getJdbcAuth(options)
+      properties.setProperty("user", user)
+      properties.setProperty("password", password)
+    }
+    properties
+  }
+
+  override def inferSchema(spark: SparkSession, config: InputConfig): Option[StructType] = {
+    val path = config.path.get
+    val jdbcUrl = buildJdbcUrl(path, config.options)
+    val tableName = requireValidIdentifier(extractTableName(path))
+    val properties = buildJdbcProperties(config.options)
+    try Some(readViaJdbc(spark, jdbcUrl, tableName, properties).schema)
+    catch {
+      case e: IllegalArgumentException => throw e
+      case NonFatal(e) =>
+        logWarning(s"[$engineName] Schema inference failed with ${e.getClass.getSimpleName}")
+        None
+    }
+  }
 
   override protected def readInternal(
     spark: SparkSession,

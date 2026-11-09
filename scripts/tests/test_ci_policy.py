@@ -378,7 +378,7 @@ def test_domain_it_isolated_shards_cover_every_infrastructure_family() -> None:
         "clickhouse": (
             "com.pista.spark.sql.clickhouse.meta,"
             "com.pista.spark.sql.connector.clickhouse",
-            9,
+            11,
         ),
         "doris": (
             "com.pista.spark.sql.doris.meta,com.pista.spark.sql.connector.doris",
@@ -403,7 +403,7 @@ def test_domain_it_isolated_shards_cover_every_infrastructure_family() -> None:
     assert "set -- clickhouse doris iceberg support" in script
     assert 'run_requested_shard "$shard"' in script
     assert "Unknown Domain IT shard" in script
-    assert sum(count for _, count in expected_shards.values()) == 49
+    assert sum(count for _, count in expected_shards.values()) == 51
 
     for name in ("ci.yml", "nightly.yml", "release-candidate.yml"):
         workflow = (project_root / ".github/workflows" / name).read_text(
