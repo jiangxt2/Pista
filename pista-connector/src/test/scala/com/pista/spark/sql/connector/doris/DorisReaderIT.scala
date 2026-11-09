@@ -104,7 +104,7 @@ class DorisReaderIT extends DorisITSupport {
         (row.getInt(0), if (row.isNullAt(1)) None else Some(row.getInt(1)), row.getInt(2))
       }.toSeq.sortBy(row => (row._1, row._3))
       assert(rows == oracle)
-      val grouped = base.copy(predicates = Seq("id = 1 OR id = 2", "id = 2"),
+      val grouped = base.copy(predicates = Seq("id = 1 OR id = 2", "id > 1"),
         columns = Seq("odd.name", "id"))
       val groupedResult = read(grouped)
       assert(groupedResult.columns.toSeq == Seq("odd.name", "id"))
@@ -125,7 +125,7 @@ class DorisReaderIT extends DorisITSupport {
       }
     }
     val residual = noPushdown.read(spark, config.copy(options = options + ("force.jdbc" -> "true"),
-      predicates = Seq("id = 1 OR id = 2", "id = 2"), columns = Seq("odd.name", "id")))
+      predicates = Seq("id = 1 OR id = 2", "id > 1"), columns = Seq("odd.name", "id")))
     assert(residual.queryExecution.executedPlan.collect { case _: FilterExec => 1 }.nonEmpty)
     assert(projected(residual) == Seq((202, 2)))
 
