@@ -2,6 +2,9 @@ package com.pista.spark.sql.connector.doris
 
 import com.pista.spark.sql.execution.datasources.reader.{InputConfig, ReaderRegistry}
 import org.apache.spark.sql.DataFrame
+import org.apache.spark.sql.execution.FilterExec
+
+import java.util.Properties
 
 class DorisReaderIT extends DorisITSupport {
   test("JDBC reader applies predicates before the requested projection") {
@@ -67,5 +70,68 @@ class DorisReaderIT extends DorisITSupport {
     assert(read(Seq("id = 9"), Seq("id")).collect().isEmpty)
     intercept[Exception] { read(Seq("id ="), Seq("id")).collect() }
     intercept[Exception] { read(columns = Seq("missing_column")).collect() }
+  }
+
+  test("Doris JDBC preserves duplicate rows and evaluates composed filters") {
+    val definition = """(id INT, payload INT NULL, `odd.name` INT) DUPLICATE KEY(id)
+      |DISTRIBUTED BY HASH(id) BUCKETS 2 PROPERTIES ("replication_num" = "2")""".stripMargin
+    val (database, table) = createDorisTable("it_doris_reader_correctness", definition)
+    executeDoris(s"INSERT INTO `$database`.`$table` VALUES (1, 11, 101), (1, 11, 101), (2, NULL, 202), (3, 33, 303)")
+    val options = Map("doris.fenodes" -> fenodes, "doris.query.port" -> feQueryPort.toString,
+      "doris.user" -> "root", "doris.password" -> "")
+    val config = InputConfig(enabled = true, path = Some(s"$database.$table"), format = "doris",
+      options = options)
+    val oracle = queryColumn(s"SELECT id, payload, `odd.name` FROM `$database`.`$table`") { result =>
+      val id = result.getInt(1)
+      val payload = result.getInt(2)
+      val optionalPayload = if (result.wasNull()) None else Some(payload)
+      (id, optionalPayload, result.getInt(3))
+    }.sortBy(row => (row._1, row._3))
+    assert(oracle == Seq((1, Some(11), 101), (1, Some(11), 101),
+      (2, None, 202), (3, Some(33), 303)))
+
+    def read(input: InputConfig): DataFrame = ReaderRegistry.read(spark, input)
+    def projected(df: DataFrame): Seq[(Int, Int)] =
+      df.collect().map(row => (row.getInt(0), row.getInt(1))).toSeq.sortBy(identity)
+
+    Seq(true, false).foreach { force =>
+      val jdbcOptions = if (force) options + ("force.jdbc" -> "true") else options
+      val base = config.copy(options = jdbcOptions)
+      val all = read(base)
+      assert(all.queryExecution.optimizedPlan.toString.contains("JDBCRelation"))
+      assert(all.columns.toSeq == Seq("id", "payload", "odd.name"))
+      val rows = all.collect().map { row =>
+        (row.getInt(0), if (row.isNullAt(1)) None else Some(row.getInt(1)), row.getInt(2))
+      }.toSeq.sortBy(row => (row._1, row._3))
+      assert(rows == oracle)
+      val grouped = base.copy(predicates = Seq("id = 1 OR id = 2", "id > 1"),
+        columns = Seq("odd.name", "id"))
+      val groupedResult = read(grouped)
+      assert(groupedResult.columns.toSeq == Seq("odd.name", "id"))
+      assert(projected(groupedResult) == Seq((202, 2)))
+      val nullRows = base.copy(predicates = Seq("payload IS NULL"), columns = Seq("id", "odd.name"))
+      assert(projected(read(nullRows)) == Seq((2, 202)))
+      val nonNullRows = base.copy(predicates = Seq("payload IS NOT NULL"), columns = Seq("id", "odd.name"))
+      assert(projected(read(nonNullRows)) == Seq((1, 101), (1, 101), (3, 303)))
+      val nullEquality = base.copy(predicates = Seq("payload = NULL"), columns = Seq("id"))
+      assert(read(nullEquality).collect().isEmpty)
+    }
+
+    val noPushdown = new DorisReader {
+      override protected def buildJdbcProperties(options: Map[String, String]): Properties = {
+        val props = super.buildJdbcProperties(options)
+        props.setProperty("pushDownPredicate", "false")
+        props
+      }
+    }
+    val residual = noPushdown.read(spark, config.copy(options = options + ("force.jdbc" -> "true"),
+      predicates = Seq("id = 1 OR id = 2", "id > 1"), columns = Seq("odd.name", "id")))
+    assert(residual.queryExecution.executedPlan.collect { case _: FilterExec => 1 }.nonEmpty)
+    assert(projected(residual) == Seq((202, 2)))
+
+    val (emptyDatabase, emptyTable) = createDorisTable("it_doris_reader_empty", definition)
+    val empty = read(config.copy(path = Some(s"$emptyDatabase.$emptyTable")))
+    assert(empty.columns.toSeq == Seq("id", "payload", "odd.name"))
+    assert(empty.collect().isEmpty)
   }
 }
