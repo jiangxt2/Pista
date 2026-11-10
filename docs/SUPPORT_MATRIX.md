@@ -1,13 +1,14 @@
 # Support Matrix
 
-This matrix defines the scope of the published
-[2.5.0 GitHub Release](https://github.com/jiangxt2/Pista/releases/tag/v2.5.0).
-Development snapshots carry no stable commitment. Source presence and a successful
+This matrix describes the published
+[2.5.0 GitHub Release](https://github.com/jiangxt2/Pista/releases/tag/v2.5.0)
+and the proposed scope for 2.6.0. The 2.6.0 scope becomes a stable commitment only
+after its release gates pass and it is published. Source presence and a successful
 build alone do not extend the supported deployment scope.
 
 ## Runtime baseline
 
-| Component | 2.5.0 baseline | Status |
+| Component | Runtime baseline | Status |
 |---|---:|---|
 | JDK | 17 | Current build baseline |
 | Scala | 2.12.18 | Current build baseline |
