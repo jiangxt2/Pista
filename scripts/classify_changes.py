@@ -55,6 +55,8 @@ DOMAINS = {
     "submitter": (
         "pista-batch/",
         "pista-assembly/",
+        "pista-metrics/src/main/",
+        "pista-metrics/pom.xml",
         "shell/",
         "scripts/prepare_hosted_runner.sh",
     ),

@@ -33,7 +33,7 @@ PROJECT_NOTICE = (
 ASF_HEADER = "Licensed to the Apache Software Foundation"
 MAVEN_WRAPPER_SHA256 = {
     "mvnw": "f05424eb41e6625686c76498ba048bc33255b4acede2c86a182eed75f5c8cfce",
-    "mvnw.cmd": "22f8751a6f6543151351cb3758aa85949ec86fae160b72fbd3fc07e6f7e1f2fe",
+    "mvnw.cmd": "58cea78a588c1118d8cae165e3450a80145ea646ef5812f844fd676f7e094abc",
 }
 PSL_PATH = Path(
     "pista-catalyst/src/main/resources/com/pista/spark/sql/catalyst/functions/public_suffix_list.dat"

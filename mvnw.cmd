@@ -101,6 +101,12 @@ trap {
   if ($TMP_DOWNLOAD_DIR.Exists) {
     Write-Warning "Retained wrapper temporary directory: $TMP_DOWNLOAD_DIR"
   }
+  if ($_.ToString() -like "*Failed to validate Maven distribution SHA-256*") {
+    [Console]::Error.WriteLine("Maven distribution SHA-256 validation failed.")
+  } else {
+    [Console]::Error.WriteLine("Maven wrapper initialization failed.")
+  }
+  exit 1
 }
 
 New-Item -Itemtype Directory -Path "$MAVEN_HOME_PARENT" -Force | Out-Null

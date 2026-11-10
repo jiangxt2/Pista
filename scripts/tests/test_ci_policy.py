@@ -304,6 +304,25 @@ def test_target_production_and_test_changes_route_submitter_appropriately() -> N
     assert not test["doris"] and not test["support"]
 
 
+def test_metrics_runtime_and_pom_route_submitter_but_not_database_shards() -> None:
+    for path in (
+        "pista-metrics/pom.xml",
+        "pista-metrics/src/main/scala/com/pista/spark/sql/metrics/MetricsManager.scala",
+        "pista-metrics/src/main/resources/metrics.properties",
+    ):
+        result = classify_changes.classify_paths([path])
+        assert result["jvm"] and result["assembly"] and result["submitter"]
+        assert not any(
+            result[name] for name in ("clickhouse", "doris", "iceberg", "support")
+        )
+
+    test_only = classify_changes.classify_paths(
+        ["pista-metrics/src/test/scala/com/pista/spark/sql/metrics/MetricsSuite.scala"]
+    )
+    assert test_only["jvm"] and test_only["assembly"]
+    assert not test_only["submitter"]
+
+
 def test_changed_paths_preserve_both_sides_of_renames(monkeypatch) -> None:
     calls = []
 
@@ -548,6 +567,7 @@ def test_ci_toolchains_use_pinned_java_and_maven_wrapper() -> None:
         in windows_wrapper
     )
     assert "Remove-Item" not in windows_wrapper
+    assert re.search(r"trap\s*\{.*?\n\s*exit 1\s*\n\}", windows_wrapper, re.S)
     assert "rm -rf" not in (root / "mvnw").read_text()
     for workflow_name in (
         "ci.yml",
