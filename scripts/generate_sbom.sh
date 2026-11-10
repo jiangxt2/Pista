@@ -9,7 +9,7 @@ OUTPUT_DIR="${1:-$PROJECT_ROOT/target/sbom}"
 mkdir -p "$OUTPUT_DIR"
 
 cd "$PROJECT_ROOT"
-mvn -B org.cyclonedx:cyclonedx-maven-plugin:2.9.3:makeAggregateBom \
+./mvnw -B org.cyclonedx:cyclonedx-maven-plugin:2.9.3:makeAggregateBom \
   -DoutputFormat=json \
   -DoutputName=pista-jvm.cdx \
   -DoutputDirectory="$OUTPUT_DIR" \

@@ -63,31 +63,33 @@ DOMAINS = {
 POLICY_PREFIXES = (".github/workflows/", "scripts/")
 TARGET_DOMAINS = ("clickhouse", "doris", "iceberg")
 CONNECTOR_PREFIX = "pista-connector/"
-DOMAIN_ALL_PREFIXES = (
-    "pista-test-common/",
-    "scripts/prepare_hosted_runner.sh",
-    "scripts/run_domain_it.sh",
-)
 
 
 def git_lines(root: Path, *args: str) -> list[str]:
     result = subprocess.run(
         ["git", *args], cwd=root, check=True, capture_output=True, text=True
     )
-    return [line for line in result.stdout.splitlines() if line]
+    return [path for path in result.stdout.split("\0") if path]
 
 
 def changed_files(root: Path, base: str | None, head: str) -> list[str]:
     if not base or set(base) == {"0"}:
-        return git_lines(root, "ls-files")
+        return git_lines(root, "ls-files", "-z")
     subprocess.run(
         ["git", "cat-file", "-e", f"{base}^{{commit}}"], cwd=root, check=True
     )
-    return git_lines(root, "diff", "--name-only", f"{base}...{head}")
+    # Disabling rename detection makes both the deleted and added paths visible.
+    return git_lines(
+        root, "diff", "--no-renames", "--name-only", "-z", f"{base}...{head}"
+    )
 
 
 def matches(path: str, prefixes: tuple[str, ...]) -> bool:
-    return any(path == prefix or path.startswith(prefix) for prefix in prefixes)
+    return any(
+        path == prefix
+        or ((prefix.endswith("/") or prefix == "pista-") and path.startswith(prefix))
+        for prefix in prefixes
+    )
 
 
 def classify_paths(paths: list[str]) -> dict[str, bool]:
@@ -96,7 +98,73 @@ def classify_paths(paths: list[str]) -> dict[str, bool]:
         for domain, prefixes in DOMAINS.items()
     }
     values["policy"] = any(matches(path, POLICY_PREFIXES) for path in paths)
-    values["domain_all"] = any(matches(path, DOMAIN_ALL_PREFIXES) for path in paths)
+    shared = (
+        "pom.xml",
+        "pista-common/",
+        "pista-catalyst/",
+        "pista-sql/",
+        "pista-test-common/",
+        "pista-batch/src/main/",
+        "pista-batch/pom.xml",
+        "sqls/",
+        "examples/",
+        "scripts/prepare_hosted_runner.sh",
+        "scripts/run_domain_it.sh",
+        "scripts/DiscoverIntegrationTests.java",
+        "scripts/verify_it_reports.py",
+        ".github/workflows/ci.yml",
+    )
+    safe_nonruntime = (
+        "README.md",
+        "CONTRIBUTING.md",
+        "LICENSE",
+        "NOTICE",
+        "THIRD_PARTY_NOTICES",
+        "config/cjk-allowlist.tsv",
+        "config/public-content-allowlist.tsv",
+    )
+    safe_policy = (
+        "scripts/classify_changes.py",
+        "scripts/check_required_gate.py",
+        "scripts/check_assembly.py",
+        "scripts/check_public_content.py",
+        "scripts/check_public_license.py",
+        "scripts/check_language.py",
+        "scripts/check_markdown.py",
+        "scripts/tests/",
+        ".github/workflows/",
+    )
+    known = (
+        (
+            "pista-common/",
+            "pista-catalyst/",
+            "pista-sql/",
+            "pista-test-common/",
+            "pista-batch/",
+            "pista-streaming/",
+            "pista-connector/",
+            "pista-metrics/",
+            "pista-clickhouse-meta/",
+            "pista-doris-meta/",
+            "pista-assembly/",
+            "examples/",
+            "shell/",
+            "sqls/",
+            ".github/CODEOWNERS",
+            "pom.xml",
+        )
+        + shared
+        + safe_policy
+        + safe_nonruntime
+    )
+    unknown = any(
+        not matches(path, known)
+        and not (
+            path.startswith("docs/") and Path(path).suffix.lower() in (".md", ".rst")
+        )
+        for path in paths
+    )
+    values["domain_all"] = unknown or any(matches(path, shared) for path in paths)
     values["connector_all"] = any(
         path.startswith(CONNECTOR_PREFIX)
         and not any(matches(path, DOMAINS[domain]) for domain in TARGET_DOMAINS)
@@ -107,9 +175,31 @@ def classify_paths(paths: list[str]) -> dict[str, bool]:
         or values["connector_all"]
         or any(values[name] for name in TARGET_DOMAINS)
     )
-    values["assembly"] = (
-        values["assembly"] or values["domain_it"] or values["submitter"]
+    values["support"] = values["domain_all"] or any(
+        path.startswith("pista-batch/src/test/")
+        and not matches(path, DOMAINS["iceberg"])
+        for path in paths
     )
+    values["domain_it"] = values["domain_it"] or values["support"]
+    target_production = any(
+        any(matches(path, DOMAINS[domain]) for domain in TARGET_DOMAINS)
+        and "/src/test/" not in path
+        for path in paths
+    )
+    values["submitter"] = (
+        values["submitter"]
+        or values["domain_all"]
+        or values["connector_all"]
+        or target_production
+    )
+    for domain in TARGET_DOMAINS:
+        values[domain] = (
+            values[domain] or values["domain_all"] or values["connector_all"]
+        )
+    if unknown:
+        values["jvm"] = True
+        values["policy"] = True
+    values["assembly"] = values["assembly"] or values["submitter"]
     values["any"] = bool(paths)
     return values
 
@@ -119,10 +209,24 @@ def main() -> int:
     parser.add_argument("--base")
     parser.add_argument("--head", default="HEAD")
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--selection",
+        choices=("", "all", "clickhouse", "doris", "iceberg", "support", "submitter"),
+        default="",
+    )
     args = parser.parse_args()
     root = Path.cwd()
     paths = changed_files(root, args.base, args.head)
     values = classify_paths(paths)
+    if args.selection:
+        for name in ("clickhouse", "doris", "iceberg", "support", "submitter"):
+            values[name] = args.selection in ("all", name)
+        values["domain_it"] = any(
+            values[name] for name in ("clickhouse", "doris", "iceberg", "support")
+        )
+        values["assembly"] = values["submitter"]
+        values["jvm"] = True
+        values["policy"] = True
 
     lines = [f"{name}={str(value).lower()}" for name, value in sorted(values.items())]
     lines.append(f"changed_count={len(paths)}")

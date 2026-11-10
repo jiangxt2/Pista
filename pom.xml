@@ -55,6 +55,11 @@
         <!-- A non-matching tag is used by the IT profiles because
              scalatest-maven-plugin 2.2.0 still emits -l for an empty value. -->
         <pista.it.exclude.tag>com.pista.DockerIT</pista.it.exclude.tag>
+        <pista.test.report.directory>surefire-reports</pista.test.report.directory>
+        <pista.it.clickhouse.packages>com.pista.spark.sql.clickhouse.meta,com.pista.spark.sql.connector.clickhouse</pista.it.clickhouse.packages>
+        <pista.it.doris.packages>com.pista.spark.sql.doris.meta,com.pista.spark.sql.connector.doris</pista.it.doris.packages>
+        <pista.it.iceberg.packages>com.pista.spark.sql.batch.iceberg</pista.it.iceberg.packages>
+        <pista.it.support.packages>com.pista.spark.sql.test.util,com.pista.spark.sql.batch,com.pista.spark.sql.test.container</pista.it.support.packages>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <!-- dependency version -->
@@ -369,7 +374,7 @@
                     <artifactId>scalatest-maven-plugin</artifactId>
                     <version>${scalatest-maven-plugin.version}</version>
                     <configuration>
-                        <reportsDirectory>${project.build.directory}/surefire-reports</reportsDirectory>
+                        <reportsDirectory>${project.build.directory}/${pista.test.report.directory}</reportsDirectory>
                         <junitxml>.</junitxml>
                         <filereports>TestSuite.txt</filereports>
                         <!-- default exclusion Docker IT;-Pit / -Pall-tests explicitly overrides. -->
@@ -462,6 +467,41 @@
     </build>
 
     <profiles>
+        <profile>
+            <id>ci-discovery</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>3.5.1</version>
+                        <executions>
+                            <execution>
+                                <id>discover-integration-tests</id>
+                                <phase>process-test-classes</phase>
+                                <goals><goal>exec</goal></goals>
+                                <configuration>
+                                    <executable>java</executable>
+                                    <classpathScope>test</classpathScope>
+                                    <arguments>
+                                        <argument>--add-opens=java.base/sun.nio.ch=ALL-UNNAMED</argument>
+                                        <argument>-cp</argument>
+                                        <classpath/>
+                                        <argument>${maven.multiModuleProjectDirectory}/scripts/DiscoverIntegrationTests.java</argument>
+                                        <argument>${project.build.testOutputDirectory}</argument>
+                                        <argument>${project.build.directory}/${pista.test.report.directory}/discovered.tsv</argument>
+                                        <argument>${pista.it.clickhouse.packages}</argument>
+                                        <argument>${pista.it.doris.packages}</argument>
+                                        <argument>${pista.it.iceberg.packages}</argument>
+                                        <argument>${pista.it.support.packages}</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
         <profile>
             <id>it</id>
             <properties>

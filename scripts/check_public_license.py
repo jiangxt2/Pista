@@ -31,6 +31,10 @@ PROJECT_NOTICE = (
     "This product includes software developed by The Pista Authors.\n"
 )
 ASF_HEADER = "Licensed to the Apache Software Foundation"
+MAVEN_WRAPPER_SHA256 = {
+    "mvnw": "f05424eb41e6625686c76498ba048bc33255b4acede2c86a182eed75f5c8cfce",
+    "mvnw.cmd": "22f8751a6f6543151351cb3758aa85949ec86fae160b72fbd3fc07e6f7e1f2fe",
+}
 PSL_PATH = Path(
     "pista-catalyst/src/main/resources/com/pista/spark/sql/catalyst/functions/public_suffix_list.dat"
 )
@@ -70,6 +74,13 @@ def project_license_findings(root: Path) -> list[str]:
 def source_header_findings(root: Path) -> list[str]:
     """Reject ASF ownership claims without requiring per-file license markers."""
     findings: list[str] = []
+    for relative_path, expected in MAVEN_WRAPPER_SHA256.items():
+        path = root / relative_path
+        if (
+            not path.is_file()
+            or hashlib.sha256(path.read_bytes()).hexdigest() != expected
+        ):
+            findings.append(f"invalid-apache-maven-wrapper: {relative_path}")
     for relative_path in candidate_files(root):
         path = root / relative_path
         if not path.is_file():
@@ -78,7 +89,7 @@ def source_header_findings(root: Path) -> list[str]:
             header = "\n".join(path.read_text(encoding="utf-8").splitlines()[:20])
         except UnicodeDecodeError:
             continue
-        if ASF_HEADER in header:
+        if ASF_HEADER in header and relative_path not in MAVEN_WRAPPER_SHA256:
             findings.append(f"unexpected-asf-header: {relative_path}")
     return findings
 

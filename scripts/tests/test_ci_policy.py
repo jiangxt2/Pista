@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -13,7 +14,7 @@ WORKFLOW_DIR = SCRIPTS_DIR.parent / ".github/workflows"
 OFFICIAL_ACTION_PINS = {
     "actions/checkout": "3d3c42e5aac5ba805825da76410c181273ba90b1",
     "actions/download-artifact": "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
-    "actions/setup-java": "b6effb05e454b25005698d916606bdc6ffcbf961",
+    "actions/setup-java": "77dd5b2ce225ea11469928ac317850245a74ae78",
     "actions/setup-python": "5fda3b95a4ea91299a34e894583c3862153e4b97",
     "actions/upload-artifact": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
 }
@@ -117,7 +118,6 @@ def test_non_workflow_github_metadata_does_not_route_policy_validation() -> None
 
 def test_policy_change_routes_only_policy_validation() -> None:
     paths = (
-        ".github/workflows/ci.yml",
         "scripts/classify_changes.py",
         "scripts/check_public_content.py",
         "scripts/check_public_license.py",
@@ -138,10 +138,10 @@ def test_policy_output_does_not_route_runtime_validation() -> None:
         "\n  content-safety:", 1
     )[0]
     jvm = workflow.split("  jvm-quality:", 1)[1].split("\n  assembly-contract:", 1)[0]
-    assembly = workflow.split("  assembly-contract:", 1)[1].split("\n  domain-it:", 1)[
-        0
-    ]
-    domain_it = workflow.split("  domain-it:", 1)[1].split("\n  core-gate:", 1)[0]
+    assembly = workflow.split("  assembly-contract:", 1)[1].split(
+        "\n  clickhouse-it:", 1
+    )[0]
+    domain_it = workflow.split("  clickhouse-it:", 1)[1].split("\n  core-gate:", 1)[0]
 
     assert "policy: ${{ steps.classify.outputs.policy }}" in changes
     assert "python-quality:" not in workflow
@@ -176,7 +176,7 @@ def test_policy_scripts_route_only_their_affected_runtime_validation() -> None:
     assert domain_it["domain_all"]
     assert domain_it["domain_it"]
     assert domain_it["assembly"]
-    assert not domain_it["submitter"]
+    assert domain_it["submitter"]
 
 
 def test_hosted_runner_preparation_routes_all_dependent_integration_suites() -> None:
@@ -219,10 +219,21 @@ def test_streaming_change_does_not_run_unrelated_database_shards() -> None:
 
 
 def successful_needs() -> dict[str, dict[str, object]]:
-    return {
-        name: {"result": "success", "outputs": {"execution": "not-required"}}
-        for name in required_gate.EXPECTED_JOBS
+    needs = {name: {"result": "success"} for name in required_gate.EXPECTED_JOBS}
+    needs["changes-and-policy"]["outputs"] = {
+        name: "true"
+        for name in (
+            "jvm",
+            "policy",
+            "assembly",
+            "clickhouse",
+            "doris",
+            "iceberg",
+            "support",
+            "submitter",
+        )
     }
+    return needs
 
 
 def test_required_gate_accepts_success_and_not_required_outputs() -> None:
@@ -236,8 +247,99 @@ def test_required_gate_rejects_failure_cancel_skip_and_missing() -> None:
         assert required_gate.gate_failures(needs)["jvm-quality"] == result
 
     needs = successful_needs()
-    del needs["domain-it"]
-    assert required_gate.gate_failures(needs)["domain-it"] == "missing"
+    del needs["clickhouse-it"]
+    assert required_gate.gate_failures(needs)["clickhouse-it"] == "missing"
+
+
+def test_selected_jobs_fail_closed_and_only_explicit_unselected_may_skip() -> None:
+    for shard in ("clickhouse", "doris", "iceberg", "support", "submitter"):
+        job = f"{shard}-it"
+        for result in ("failure", "cancelled", "skipped"):
+            needs = successful_needs()
+            needs[job]["result"] = result
+            assert required_gate.gate_failures(needs)[job] == result
+        needs = successful_needs()
+        needs["changes-and-policy"]["outputs"][shard] = "false"
+        needs[job]["result"] = "skipped"
+        assert required_gate.gate_failures(needs) == {}
+        del needs["changes-and-policy"]["outputs"][shard]
+        assert required_gate.gate_failures(needs)[job] == "skipped"
+
+    needs = successful_needs()
+    needs["changes-and-policy"]["outputs"]["assembly"] = "false"
+    assert required_gate.gate_failures(needs)["classification.assembly"]
+    needs["changes-and-policy"]["result"] = "failure"
+    assert required_gate.gate_failures(needs)["changes-and-policy"] == "failure"
+
+
+def test_shared_and_unknown_changes_route_all_integration_tests() -> None:
+    for path in (
+        "pom.xml",
+        "pista-common/src/main/scala/Example.scala",
+        "pista-sql/src/main/scala/Example.scala",
+        "pista-test-common/src/test/resources/test.sql",
+        "sqls/postgre/00_meta.sql",
+        "scripts/run_domain_it.sh",
+        ".github/workflows/ci.yml",
+        "new-area/config.yaml",
+        "README.md.sh",
+        "docs/build.py",
+        ".mvn/wrapper/maven-wrapper.properties",
+        "mvnw",
+    ):
+        result = classify_changes.classify_paths([path])
+        assert all(
+            result[name]
+            for name in ("clickhouse", "doris", "iceberg", "support", "submitter")
+        ), path
+        assert result["assembly"]
+
+
+def test_target_production_and_test_changes_route_submitter_appropriately() -> None:
+    root = "pista-connector/src/{}/scala/com/pista/spark/sql/connector/clickhouse/Reader.scala"
+    production = classify_changes.classify_paths([root.format("main")])
+    test = classify_changes.classify_paths([root.format("test")])
+    assert production["clickhouse"] and production["submitter"]
+    assert test["clickhouse"] and not test["submitter"]
+    assert not test["doris"] and not test["support"]
+
+
+def test_changed_paths_preserve_both_sides_of_renames(monkeypatch) -> None:
+    calls = []
+
+    def fake_git_lines(root, *args):
+        calls.append(args)
+        return [
+            "pista-connector/src/main/scala/com/pista/spark/sql/connector/clickhouse/Reader.scala",
+            "pista-connector/src/main/scala/com/pista/spark/sql/connector/doris/Reader.scala",
+        ]
+
+    monkeypatch.setattr(classify_changes, "git_lines", fake_git_lines)
+    monkeypatch.setattr(
+        classify_changes.subprocess, "run", lambda *args, **kwargs: None
+    )
+    paths = classify_changes.changed_files(Path("."), "base", "head")
+    assert "--no-renames" in calls[0] and "-z" in calls[0]
+    result = classify_changes.classify_paths(paths)
+    assert result["clickhouse"] and result["doris"] and result["submitter"]
+
+
+def test_manual_shard_selection_is_explicit(monkeypatch, capsys) -> None:
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    monkeypatch.setattr(classify_changes, "changed_files", lambda *_: [])
+    monkeypatch.setattr(sys, "argv", ["classify_changes.py", "--selection", "doris"])
+    assert classify_changes.main() == 0
+    outputs = dict(line.split("=", 1) for line in capsys.readouterr().out.splitlines())
+    assert outputs["doris"] == "true"
+    assert outputs["clickhouse"] == outputs["submitter"] == "false"
+
+
+def test_manual_dispatch_does_not_cancel_automatic_runs() -> None:
+    workflow = (WORKFLOW_DIR / "ci.yml").read_text(encoding="utf-8")
+    concurrency = workflow.split("concurrency:", 1)[1].split("\njobs:", 1)[0]
+    assert "github.event_name == 'workflow_dispatch'" in concurrency
+    assert "format('manual-{0}', github.run_id)" in concurrency
+    assert "github.event.pull_request.number || github.ref" in concurrency
 
 
 def test_required_gate_checks_out_repository_script() -> None:
@@ -364,10 +466,14 @@ def test_container_it_prepares_hosted_runner_disk() -> None:
         assert preparation < domain_it
 
     ci = (project_root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    preparation_step = ci[: ci.index("scripts/prepare_hosted_runner.sh")]
-    preparation_condition = preparation_step.rsplit("- if:", 1)[1]
-    assert "outputs.domain_it == 'true'" in preparation_condition
-    assert "outputs.submitter == 'true'" in preparation_condition
+    for shard in ("clickhouse", "doris", "iceberg", "support", "submitter"):
+        job = re.split(
+            r"\n  [a-z][\w-]*:", ci.split(f"  {shard}-it:", 1)[1], maxsplit=1
+        )[0]
+        assert f"outputs.{shard} == 'true'" in job
+        assert job.index("scripts/prepare_hosted_runner.sh") < job.index(
+            "scripts/run_domain_it.sh"
+        )
 
 
 def test_domain_it_isolated_shards_cover_every_infrastructure_family() -> None:
@@ -392,10 +498,9 @@ def test_domain_it_isolated_shards_cover_every_infrastructure_family() -> None:
         ),
     }
     for name, (packages, count) in expected_shards.items():
-        runner = "run_native_shard" if name == "iceberg" else "run_shard"
-        assert f"{runner} {name}" in script
+        assert f"    {name})" in script
         assert packages in script
-        assert f'" {count}' in script
+        assert f"expected_tests={count}" in script
 
     assert "-DmembersOnlySuites=" in script
     assert "actual_tests" in script
@@ -413,22 +518,15 @@ def test_domain_it_isolated_shards_cover_every_infrastructure_family() -> None:
         assert "run: mvn -B -Pit test" not in workflow
 
     ci = (project_root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    domain_job = ci.split("  domain-it:", 1)[1].split("\n  core-gate:", 1)[0]
-    for shard in ("clickhouse", "doris", "iceberg"):
-        assert f"scripts/run_domain_it.sh {shard}" in ci
-        shard_condition = domain_job[
-            : domain_job.index(f"scripts/run_domain_it.sh {shard}")
-        ].rsplit("- if:", 1)[1]
-        assert "outputs.domain_all == 'true'" in shard_condition
-        assert "outputs.connector_all == 'true'" in shard_condition
-        assert f"outputs.{shard} == 'true'" in shard_condition
-    assert "scripts/run_domain_it.sh support" in ci
-    support_condition = domain_job[
-        : domain_job.index("scripts/run_domain_it.sh support")
-    ].rsplit("- if:", 1)[1]
-    assert "outputs.domain_all == 'true'" in support_condition
-    assert "outputs.connector_all" not in support_condition
-    assert "run: scripts/run_domain_it.sh\n" not in ci
+    for shard in ("clickhouse", "doris", "iceberg", "support", "submitter"):
+        job = re.split(
+            r"\n  [a-z][\w-]*:", ci.split(f"  {shard}-it:", 1)[1], maxsplit=1
+        )[0]
+        assert f"scripts/run_domain_it.sh {shard}" in job
+        assert f"name: {shard}-it-reports" in job
+        assert "**/target/surefire-reports/pista-it/**" in job
+        assert ("actions/download-artifact@" in job) is (shard == "submitter")
+        assert f"- {shard}-it" in ci.split("  core-gate:", 1)[1]
 
 
 def test_sbom_generation_excludes_provided_components() -> None:
@@ -436,13 +534,64 @@ def test_sbom_generation_excludes_provided_components() -> None:
     assert "-DincludeProvidedScope=false" in script
 
 
+def test_ci_toolchains_use_pinned_java_and_maven_wrapper() -> None:
+    root = SCRIPTS_DIR.parent
+    properties = (root / ".mvn/wrapper/maven-wrapper.properties").read_text()
+    assert "apache-maven/3.9.5/apache-maven-3.9.5-bin.zip" in properties
+    assert (
+        "distributionSha256Sum=7822eb593d29558d8edf87845a2c47e36e2a89d17a84cd2390824633214ed423"
+        in properties
+    )
+    windows_wrapper = (root / "mvnw.cmd").read_text()
+    assert (
+        'if ($USE_MVND) { "/maven/mvnd/" } else { "/org/apache/maven/" }'
+        in windows_wrapper
+    )
+    assert "Remove-Item" not in windows_wrapper
+    assert "rm -rf" not in (root / "mvnw").read_text()
+    for workflow_name in (
+        "ci.yml",
+        "nightly.yml",
+        "release-candidate.yml",
+        "osv-scan.yml",
+    ):
+        workflow = (WORKFLOW_DIR / workflow_name).read_text()
+        assert 'java-version: "17.0.18.9.1"' in workflow
+        assert not re.search(r"(?<![\w./])mvn -B", workflow)
+    for script_name in ("run_domain_it.sh", "generate_sbom.sh"):
+        script = (SCRIPTS_DIR / script_name).read_text()
+        assert "./mvnw" in script
+        assert not re.search(r"(?<![\w./])mvn (?:-B|\")", script)
+
+
+def test_only_exact_apache_wrapper_scripts_may_have_asf_header(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = SCRIPTS_DIR.parent
+    for name in public_license.MAVEN_WRAPPER_SHA256:
+        (tmp_path / name).write_bytes((root / name).read_bytes())
+    other = tmp_path / "other.sh"
+    other.write_text(public_license.ASF_HEADER, encoding="utf-8")
+    monkeypatch.setattr(
+        public_license, "candidate_files", lambda _: ["mvnw", "mvnw.cmd", "other.sh"]
+    )
+    assert public_license.source_header_findings(tmp_path) == [
+        "unexpected-asf-header: other.sh"
+    ]
+    (tmp_path / "mvnw").write_text("altered", encoding="utf-8")
+    assert (
+        "invalid-apache-maven-wrapper: mvnw"
+        in public_license.source_header_findings(tmp_path)
+    )
+
+
 def test_release_candidate_binds_identity_and_scans_the_delivered_sbom() -> None:
     workflow = (WORKFLOW_DIR / "release-candidate.yml").read_text(encoding="utf-8")
     scanner = (WORKFLOW_DIR / "osv-scan.yml").read_text(encoding="utf-8")
     check = workflow.index("prepare_release.py check")
     package = workflow.index("prepare_release.py package")
-    assert check < workflow.index("mvn -B test")
-    assert workflow.index("mvn -B -Psubmitter-it test") < package
+    assert check < workflow.index("./mvnw -B test")
+    assert workflow.index("scripts/run_domain_it.sh submitter") < package
     assert "expected_commit:" in workflow and "version:" in workflow
     assert '-Dpista.source.revision="$SOURCE_COMMIT"' in workflow
     assert "path: target/release/*" in workflow
