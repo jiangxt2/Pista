@@ -18,20 +18,37 @@ EXPECTED_JOBS = {
     "policy-tests",
     "jvm-quality",
     "assembly-contract",
-    "domain-it",
+    "clickhouse-it",
+    "doris-it",
+    "iceberg-it",
+    "support-it",
+    "submitter-it",
     "vulnerability-scan",
 }
 
 
 def gate_failures(needs: dict[str, Any]) -> dict[str, str]:
     failures = {name: "missing" for name in sorted(EXPECTED_JOBS) if name not in needs}
-    failures.update(
-        {
-            name: str(data.get("result", "missing-result"))
-            for name, data in needs.items()
-            if name in EXPECTED_JOBS and data.get("result") != "success"
-        }
-    )
+    classify = needs.get("changes-and-policy", {})
+    outputs = classify.get("outputs", {}) if classify.get("result") == "success" else {}
+    selected_jobs = {
+        f"{name}-it": name
+        for name in ("clickhouse", "doris", "iceberg", "support", "submitter")
+    }
+    for name in ("jvm", "policy", "assembly", *selected_jobs.values()):
+        if outputs.get(name) not in ("true", "false"):
+            failures[f"classification.{name}"] = "missing or invalid"
+    if outputs.get("submitter") == "true" and outputs.get("assembly") != "true":
+        failures["classification.assembly"] = "required by submitter"
+    for name, data in needs.items():
+        if name not in EXPECTED_JOBS:
+            continue
+        result = data.get("result", "missing-result")
+        allowed_skip = (
+            name in selected_jobs and outputs.get(selected_jobs[name]) == "false"
+        )
+        if result != "success" and not (allowed_skip and result == "skipped"):
+            failures[name] = str(result)
     return failures
 
 

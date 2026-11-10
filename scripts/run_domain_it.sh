@@ -2,68 +2,76 @@
 
 set -euo pipefail
 
-run_shard() {
-  local name="$1"
-  local packages="$2"
-  local expected_tests="$3"
-  local log_file="${TMPDIR:-/tmp}/pista-domain-it-${name}.log"
+clickhouse_packages="com.pista.spark.sql.clickhouse.meta,com.pista.spark.sql.connector.clickhouse"
+doris_packages="com.pista.spark.sql.doris.meta,com.pista.spark.sql.connector.doris"
+iceberg_packages="com.pista.spark.sql.batch.iceberg"
+support_packages="com.pista.spark.sql.test.util,com.pista.spark.sql.batch,com.pista.spark.sql.test.container"
 
-  mvn -B -Pit test -DmembersOnlySuites="$packages" 2>&1 | tee "$log_file"
-
-  local actual_tests
-  actual_tests="$(awk '/Total number of tests run:/ { total += $NF } END { print total + 0 }' "$log_file")"
-  if [[ "$actual_tests" != "$expected_tests" ]]; then
-    echo "Domain IT shard ${name} ran ${actual_tests} tests; expected ${expected_tests}." >&2
-    exit 1
-  fi
-}
-
-run_native_shard() {
-  local name="$1"
-  local packages="$2"
-  local expected_tests="$3"
-  local log_file="${TMPDIR:-/tmp}/pista-domain-it-${name}.log"
-
-  mvn -B test -DmembersOnlySuites="$packages" 2>&1 | tee "$log_file"
-
-  local actual_tests
-  actual_tests="$(awk '/Total number of tests run:/ { total += $NF } END { print total + 0 }' "$log_file")"
-  if [[ "$actual_tests" != "$expected_tests" ]]; then
-    echo "Native domain shard ${name} ran ${actual_tests} tests; expected ${expected_tests}." >&2
-    exit 1
-  fi
-}
-
-# Each shard runs in a separate Maven process so its Testcontainers graph is
-# closed before the next engine starts on a memory-constrained hosted runner.
 run_requested_shard() {
-  case "$1" in
+  local name="$1"
+  local packages=""
+  local expected_tests=""
+  local profile="it"
+  case "$name" in
     clickhouse)
-      run_shard clickhouse \
-        "com.pista.spark.sql.clickhouse.meta,com.pista.spark.sql.connector.clickhouse" 11
+      packages="$clickhouse_packages"
+      expected_tests=11
       ;;
     doris)
-      run_shard doris \
-        "com.pista.spark.sql.doris.meta,com.pista.spark.sql.connector.doris" 31
+      packages="$doris_packages"
+      expected_tests=31
       ;;
     iceberg)
-      run_native_shard iceberg "com.pista.spark.sql.batch.iceberg" 5
+      packages="$iceberg_packages"
+      expected_tests=5
+      profile=""
       ;;
     support)
-      run_shard support \
-        "com.pista.spark.sql.test.util,com.pista.spark.sql.batch,com.pista.spark.sql.test.container" 4
+      packages="$support_packages"
+      expected_tests=4
+      ;;
+    submitter)
+      profile="submitter-it"
       ;;
     *)
-      echo "Unknown Domain IT shard: $1" >&2
-      exit 1
+      echo "Unknown Domain IT shard: $name" >&2
+      return 1
       ;;
   esac
+
+  local report_dir="pista-it-${name}-$(date +%s)-$$"
+  local log_file="target/${report_dir}/run.log"
+  mkdir -p "target/${report_dir}"
+  local report_option="-Dpista.test.report.directory=${report_dir}"
+  ./mvnw -B -Pci-discovery process-test-classes -DskipTests "$report_option" \
+    "-Dpista.it.clickhouse.packages=$clickhouse_packages" \
+    "-Dpista.it.doris.packages=$doris_packages" \
+    "-Dpista.it.iceberg.packages=$iceberg_packages" \
+    "-Dpista.it.support.packages=$support_packages" 2>&1 | tee "$log_file"
+  python3 -B scripts/verify_it_reports.py "$name" "$report_dir" --before | tee -a "$log_file"
+
+  local args=(-B test "$report_option")
+  if [[ -n "$profile" ]]; then
+    args+=("-P${profile}")
+  fi
+  if [[ -n "$packages" ]]; then
+    args+=("-DmembersOnlySuites=${packages}")
+  fi
+  ./mvnw "${args[@]}" 2>&1 | tee -a "$log_file"
+  python3 -B scripts/verify_it_reports.py "$name" "$report_dir" | tee -a "$log_file"
+  if [[ -n "$expected_tests" ]]; then
+    local actual_tests
+    actual_tests="$(awk '/Total number of tests run:/ { total += $NF } END { print total + 0 }' "$log_file")"
+    if [[ "$actual_tests" != "$expected_tests" ]]; then
+      echo "Domain IT shard ${name} ran ${actual_tests} tests; expected ${expected_tests}." >&2
+      return 1
+    fi
+  fi
 }
 
 if (( $# == 0 )); then
   set -- clickhouse doris iceberg support
 fi
-
 for shard in "$@"; do
   run_requested_shard "$shard"
 done
