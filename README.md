@@ -23,7 +23,7 @@ Structured Streaming is experimental. Connector guarantees depend on the target,
 
 The first stable distribution is [Pista 2.5.0](https://github.com/jiangxt2/Pista/releases/tag/v2.5.0).
 Download its complete [Spark-submit JAR](https://github.com/jiangxt2/Pista/releases/download/v2.5.0/pista-2.5.0.jar).
-Builds from master use `2.6.0-SNAPSHOT` and are development artifacts. Maven Central coordinates are not published.
+A 2.6.0 source build is not itself a published release. Maven Central coordinates are not published.
 See the [support scope](docs/SUPPORT_MATRIX.md), [stability policy](docs/STABILITY.md), and
 [release process](docs/releases.md) for candidate validation, migration and development-version rules.
 

@@ -1,7 +1,7 @@
 # Release process
 
 Pista 2.5.0 is the first stable GitHub distribution. This process applies to future
-stable releases; commands below use 2.5.0 as an example. The
+stable releases; commands below use the 2.6.0 candidate as an example. The
 submission JAR is built for JDK 17, Scala 2.12.18 and Spark 3.5.8. The
 [support matrix](SUPPORT_MATRIX.md) and [stability policy](STABILITY.md) define
 the promise; Experimental features retain their status when a stable release is
@@ -32,7 +32,7 @@ Authorize one final run using a branch or tag that points to the selected commit
 
 ```bash
 gh workflow run release-candidate.yml --ref APPROVED_SOURCE_REF \
-  -f version=2.5.0 -f expected_commit=APPROVED_FULL_COMMIT_SHA
+  -f version=2.6.0 -f expected_commit=APPROVED_FULL_COMMIT_SHA
 ```
 
 The workflow runs public-content, language, Markdown, license, policy and JVM
@@ -51,8 +51,8 @@ before requesting a necessary rerun.
 
 The bundle contains exactly:
 
-- `pista-2.5.0.jar`: the complete Spark-submit runtime, with version and source-commit metadata.
-- `pista-2.5.0-src.tar.gz`: tracked source from the same commit, including licenses, documentation, configuration examples and metadata migration SQL.
+- `pista-2.6.0.jar`: the complete Spark-submit runtime, with version and source-commit metadata.
+- `pista-2.6.0-src.tar.gz`: tracked source from the same commit, including licenses, documentation, configuration examples and metadata migration SQL.
 - `pista-jvm.cdx.json`: the runtime CycloneDX SBOM.
 - `release-manifest.json`: version, tag, source commit, runtime baseline and asset hashes.
 - `SHA256SUMS`: hashes with basename-only paths that work after download.
@@ -61,7 +61,7 @@ Download `pista-release-candidate-APPROVED_FULL_COMMIT_SHA` from the successful
 approved run. Verify it without rebuilding:
 
 ```bash
-python3 -B scripts/prepare_release.py verify --version 2.5.0 \
+python3 -B scripts/prepare_release.py verify --version 2.6.0 \
   --commit APPROVED_FULL_COMMIT_SHA --directory target/downloaded-candidate
 ```
 
@@ -85,7 +85,7 @@ declared compatibility/migration scope before requesting publication approval.
 Present the complete English release notes, exact version tag, source commit and
 five attachments for approval. Obtain repository-setting approval to enable
 [immutable Releases](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases),
-then read back that immutability is enabled. Create `v2.5.0` at the approved source
+then read back that immutability is enabled. Create `v2.6.0` at the approved source
 commit; an existing tag must resolve to that same commit. Never move an existing
 published version tag.
 
@@ -109,9 +109,9 @@ writer guide. Release publication does not apply production schema migrations.
 
 After publication verification, create a separate worktree and PR to:
 
-- Set the root `revision` to `2.6.0-SNAPSHOT`; child modules and the Assembly follow the reactor value.
+- Set the root `revision` to `2.7.0-SNAPSHOT`; child modules and the Assembly follow the reactor value.
 - Keep versioned change history in the GitHub Release notes, including upgrade notes and a full comparison with the previous release tag.
-- Keep released download examples at 2.5.0 while development build paths follow the reactor revision.
+- Update released download examples to 2.6.0 after publication while development build paths follow the reactor revision.
 - Preserve existing `.version("2.5")` annotations, which record introduction rather than the current build version.
 - Retain the runtime baseline unless a separately reviewed upgrade provides its required compatibility evidence.
 
